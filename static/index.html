@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OmniSight-NVR ✦ Universal Camera Hub</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Cinzel:wght@500;700&display=swap" rel="stylesheet">
+</head>
+<body class="theme-gothic">
+  <div class="app-container">
+    <!-- Navigation / Top Bar -->
+    <header class="top-nav">
+      <div class="brand-section">
+        <div class="brand-badge">
+          <span class="fox-emblem">✦</span>
+          <div class="brand-text">
+            <h1 class="brand-title">OMNISIGHT<span class="brand-sub">NVR</span></h1>
+            <span class="brand-tagline">UNIVERSAL SURVEILLANCE MATRIX</span>
+          </div>
+        </div>
+        <div class="system-health">
+          <span class="status-indicator live-pulse"></span>
+          <span class="status-label">MATRIX ONLINE</span>
+          <span class="clock-display" id="clockDisplay">00:00:00</span>
+        </div>
+      </div>
+
+      <div class="top-controls">
+        <!-- Layout Selector -->
+        <div class="control-group">
+          <span class="control-label">LAYOUT</span>
+          <div class="layout-buttons">
+            <button class="btn-layout" data-layout="1x1" title="Single Focus View">1×1</button>
+            <button class="btn-layout active" data-layout="2x2" title="Quad Matrix (2x2)">2×2</button>
+            <button class="btn-layout" data-layout="3x3" title="9-Grid Matrix (3x3)">3×3</button>
+            <button class="btn-layout" data-layout="4x4" title="16-Grid Matrix (4x4)">4×4</button>
+          </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="action-buttons">
+          <button class="btn-action btn-primary" id="btnAddCamera">
+            <span class="icon">+</span> ADD CAMERA
+          </button>
+          <button class="btn-action btn-secondary" id="btnScanNetwork">
+            <span class="icon">⚡</span> DISCOVERY
+          </button>
+          <button class="btn-action btn-secondary" id="btnOpenGallery">
+            <span class="icon">📷</span> GALLERY
+          </button>
+          <button class="btn-action btn-ghost" id="btnVendorGuide">
+            <span class="icon">📖</span> CHEATSHEET
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Sub-header Filters & Status Bar -->
+    <div class="filter-bar">
+      <div class="group-pills" id="groupPills">
+        <button class="pill active" data-group="All">All Cameras (<span id="totalCamCount">0</span>)</button>
+      </div>
+      <div class="quick-stats">
+        <span class="stat-item"><span class="stat-dot green"></span> Hikvision / Dahua / XM Unified</span>
+        <span class="stat-item" id="storageInfo">Storage: Active</span>
+      </div>
+    </div>
+
+    <!-- Main Camera Grid Container -->
+    <main class="grid-viewport">
+      <div class="camera-grid grid-2x2" id="cameraGrid">
+        <!-- Camera cards dynamically inserted here -->
+      </div>
+    </main>
+
+    <!-- Footer Telemetry -->
+    <footer class="app-footer">
+      <div class="footer-meta">
+        <span>OmniSight Core v1.0.0</span>
+        <span class="divider">|</span>
+        <span>Engine: Python Async Multiplexer</span>
+        <span class="divider">|</span>
+        <span id="ffmpegStatus">RTSP Transcoder: Checking...</span>
+      </div>
+      <div class="footer-links">
+        <span class="quote">"Right here, right now... every camera brought into obedience."</span>
+      </div>
+    </footer>
+  </div>
+
+  <!-- MODAL: Add / Edit Camera -->
+  <div class="modal-overlay hidden" id="cameraModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 id="modalTitle">Add Camera to Matrix</h3>
+        <button class="btn-close" id="btnCloseCameraModal">&times;</button>
+      </div>
+      <form id="cameraForm" class="modal-body">
+        <input type="hidden" id="camId" name="id">
+
+        <div class="form-row">
+          <div class="form-group flex-2">
+            <label for="camName">Camera Name</label>
+            <input type="text" id="camName" name="name" required placeholder="e.g. Front Gate Hikvision 4MP">
+          </div>
+          <div class="form-group flex-1">
+            <label for="camGroup">Zone / Group</label>
+            <input type="text" id="camGroup" name="group" list="groupSuggestions" placeholder="Perimeter">
+            <datalist id="groupSuggestions">
+              <option value="Perimeter">
+              <option value="Backyard">
+              <option value="Driveway">
+              <option value="Indoor">
+              <option value="Entrance">
+            </datalist>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group flex-2">
+            <label for="camVendor">Camera Brand / Vendor Preset</label>
+            <select id="camVendor" name="vendor" class="select-vendor">
+              <option value="hikvision">Hikvision (DS-2CD / ColorVu / AcuSense)</option>
+              <option value="dahua">Dahua / Imou (IPC / WizSense)</option>
+              <option value="xiongmai">Xiongmai / XM / CMS (Generic Chinese Cam)</option>
+              <option value="tapo">TP-Link Tapo (C100 / C200 / C310)</option>
+              <option value="reolink">Reolink (RLC / Duo / E1)</option>
+              <option value="yoosee">Yoosee / Cooau / VStarcam</option>
+              <option value="v380">V380 / V380 Pro</option>
+              <option value="uniview">Uniview (UNV)</option>
+              <option value="axis">Axis Communications</option>
+              <option value="generic_onvif">Generic ONVIF Camera</option>
+              <option value="generic_rtsp">Custom RTSP Stream</option>
+              <option value="mjpeg_http">HTTP MJPEG / ESP32-CAM</option>
+              <option value="simulated">OmniSight Virtual Generator (Simulation)</option>
+            </select>
+          </div>
+          <div class="form-group flex-1">
+            <label for="camChannel">Channel #</label>
+            <input type="number" id="camChannel" name="channel" value="1" min="0" max="64">
+          </div>
+        </div>
+
+        <!-- Vendor Specific Quirk Alert Box -->
+        <div class="vendor-quirk-box" id="vendorQuirks">
+          <span class="quirk-title">Vendor Notes:</span>
+          <p id="quirkText">Select a vendor above to inspect connection rules.</p>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group flex-2">
+            <label for="camIp">IP Address or Hostname</label>
+            <input type="text" id="camIp" name="ip" placeholder="192.168.1.100">
+          </div>
+          <div class="form-group flex-1">
+            <label for="camPort">Port</label>
+            <input type="number" id="camPort" name="port" value="554">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label for="camUser">Username</label>
+            <input type="text" id="camUser" name="username" placeholder="admin">
+          </div>
+          <div class="form-group flex-1">
+            <label for="camPass">Password</label>
+            <input type="password" id="camPass" name="password" placeholder="••••••••">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <div class="label-with-action">
+            <label for="camStreamUrl">Calculated Stream URL</label>
+            <button type="button" class="btn-text" id="btnAutoGenerateUrl">Re-calculate</button>
+          </div>
+          <input type="text" id="camStreamUrl" name="stream_url" placeholder="rtsp://admin:pass@192.168.1.100:554/Streaming/Channels/101">
+        </div>
+
+        <div class="form-row check-row">
+          <label class="checkbox-label">
+            <input type="checkbox" id="camPtz" name="ptz"> Enable Virtual PTZ Controls
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" id="camSimulated" name="is_simulated"> Use Internal Stream Simulator
+          </label>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn-action btn-ghost" id="btnCancelCam">Cancel</button>
+          <button type="submit" class="btn-action btn-primary">Save Camera</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Network Discovery -->
+  <div class="modal-overlay hidden" id="discoveryModal">
+    <div class="modal-dialog modal-large">
+      <div class="modal-header">
+        <h3>Network Surveillance Scanner</h3>
+        <button class="btn-close" id="btnCloseDiscoveryModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="section-desc">Sends ONVIF WS-Discovery probes (UDP 3702) and scans local LAN subnet for RTSP (554), Xiongmai CMS (34567), and Dahua (37777) ports.</p>
+        
+        <div class="scanner-actions">
+          <button class="btn-action btn-primary" id="btnStartScan">
+            <span class="icon">🔍</span> Run Full Network Scan
+          </button>
+          <span class="scan-status" id="scanStatusMsg">Ready to scan.</span>
+        </div>
+
+        <div class="discovery-results" id="discoveryResults">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>IP Address</th>
+                <th>Type</th>
+                <th>Identified Hardware</th>
+                <th>Open Ports</th>
+                <th>Confidence</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="discoveryTableBody">
+              <tr>
+                <td colspan="6" class="empty-state">Click "Run Full Network Scan" to query your network.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Snapshot Gallery -->
+  <div class="modal-overlay hidden" id="galleryModal">
+    <div class="modal-dialog modal-large">
+      <div class="modal-header">
+        <h3>Captured Stills & Snapshots</h3>
+        <button class="btn-close" id="btnCloseGalleryModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="gallery-grid" id="galleryGrid">
+          <!-- Snapshots dynamically populated -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Vendor Cheatsheet & Quirks -->
+  <div class="modal-overlay hidden" id="vendorGuideModal">
+    <div class="modal-dialog modal-large">
+      <div class="modal-header">
+        <h3>Universal Camera Compatibility Matrix</h3>
+        <button class="btn-close" id="btnCloseGuideModal">&times;</button>
+      </div>
+      <div class="modal-body guide-content">
+        <div class="guide-grid">
+          <div class="guide-card">
+            <h4>Hikvision (DS-2CD / AcuSense)</h4>
+            <p><strong>RTSP:</strong> <code>rtsp://admin:pass@ip:554/Streaming/Channels/101</code></p>
+            <p><strong>Channel Rule:</strong> Channel 1 Main is <code>101</code>, Sub-stream is <code>102</code>.</p>
+            <p><strong>Quirk:</strong> ONVIF is disabled by default on recent firmware. Must enable in <em>Configuration &gt; Network &gt; Advanced &gt; Integration Protocol</em> and configure Digest/Basic auth.</p>
+          </div>
+
+          <div class="guide-card">
+            <h4>Xiongmai (XM / NetSurveillance)</h4>
+            <p><strong>RTSP:</strong> <code>rtsp://admin:pass@ip:554/live/ch0</code></p>
+            <p><strong>Ports:</strong> 554 (RTSP), 34567 (CMS Media), 8899 (ONVIF)</p>
+            <p><strong>Quirk:</strong> Powers almost all unbranded "Chinese security cameras" on Amazon/AliExpress. Often has NO password on admin. Uses port 34567 for desktop CMS.</p>
+          </div>
+
+          <div class="guide-card">
+            <h4>Dahua &amp; Imou (IPC / WizSense)</h4>
+            <p><strong>RTSP:</strong> <code>rtsp://admin:pass@ip:554/cam/realmonitor?channel=1&amp;subtype=0</code></p>
+            <p><strong>Ports:</strong> 554 (RTSP), 37777 (Dahua Management)</p>
+            <p><strong>Quirk:</strong> Subtype 0 = Main, Subtype 1 = Sub. For Imou Wi-Fi cams, the ONVIF password is the safety code on the base sticker.</p>
+          </div>
+
+          <div class="guide-card">
+            <h4>TP-Link Tapo (C200 / C310)</h4>
+            <p><strong>RTSP:</strong> <code>rtsp://user:pass@ip:554/stream1</code></p>
+            <p><strong>Ports:</strong> 554 (RTSP), 2020 (ONVIF)</p>
+            <p><strong>Quirk:</strong> You MUST create a local "Camera Account" inside the Tapo mobile app under <em>Device Settings &gt; Advanced Settings &gt; Camera Account</em>.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PTZ Floating Controller Template (Spawned per camera) -->
+  <div class="ptz-overlay-panel hidden" id="ptzPanel">
+    <div class="ptz-header">
+      <span id="ptzCamTitle">PTZ Controller</span>
+      <button class="btn-close-sm" id="btnClosePtz">&times;</button>
+    </div>
+    <div class="ptz-body">
+      <div class="ptz-pad">
+        <button class="ptz-btn ptz-up" data-ptz="up">▲</button>
+        <div class="ptz-mid">
+          <button class="ptz-btn ptz-left" data-ptz="left">◀</button>
+          <button class="ptz-btn ptz-center" data-ptz="home">●</button>
+          <button class="ptz-btn ptz-right" data-ptz="right">▶</button>
+        </div>
+        <button class="ptz-btn ptz-down" data-ptz="down">▼</button>
+      </div>
+      <div class="ptz-zoom">
+        <button class="ptz-btn" data-ptz="zoom_in">+ ZOOM</button>
+        <button class="ptz-btn" data-ptz="zoom_out">- ZOOM</button>
+      </div>
+      <div class="ptz-telemetry" id="ptzTelemetry">
+        PAN: +000.0° | TILT: +000.0° | ZOOM: 1.0x
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

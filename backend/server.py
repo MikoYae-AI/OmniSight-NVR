@@ -1,0 +1,412 @@
+"""
+OmniSight-NVR - High-Performance Surveillance Web Server
+Multithreaded REST API, live multipart/x-mixed-replace MJPEG stream broadcaster,
+and static asset server with zero external dependencies.
+"""
+
+import os
+import sys
+import json
+import time
+import shutil
+import urllib.parse
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+from typing import Dict, Any
+
+try:
+    from .config_manager import ConfigManager
+    from .stream_proxy import StreamManager
+    from .vendor_presets import VENDOR_PRESETS, build_stream_url
+    from .discovery import run_full_discovery
+    from .recorder import RecorderManager
+except (ImportError, ValueError):
+    from config_manager import ConfigManager
+    from stream_proxy import StreamManager
+    from vendor_presets import VENDOR_PRESETS, build_stream_url
+    from discovery import run_full_discovery
+    from recorder import RecorderManager
+
+STATIC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "static"))
+SNAPSHOTS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "snapshots"))
+
+config_manager = ConfigManager()
+stream_manager = StreamManager(config_manager)
+recorder_manager = RecorderManager(stream_manager)
+
+
+class OmniSightHandler(BaseHTTPRequestHandler):
+    """Handles REST API calls, live video streams, and static dashboard assets."""
+
+    server_version = "OmniSight-NVR/1.0"
+
+    def log_message(self, format, *args):
+        # Silence routine stream requests from spamming console
+        if "/stream" in args[0] or "/static" in args[0]:
+            return
+        super().log_message(format, *args)
+
+    def send_json(self, data: Any, status: int = 200):
+        body = json.dumps(data, indent=2).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.end_headers()
+
+    def do_GET(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+        query = urllib.parse.parse_qs(parsed.query)
+
+        # Static root
+        if path == "/" or path == "/index.html":
+            self.serve_file(os.path.join(STATIC_DIR, "index.html"), "text/html")
+            return
+
+        # Static assets
+        if path.startswith("/static/"):
+            rel_path = path[len("/static/"):].lstrip("/")
+            file_path = os.path.join(STATIC_DIR, rel_path)
+            # Security check
+            if not os.path.abspath(file_path).startswith(STATIC_DIR):
+                self.send_error(403, "Forbidden")
+                return
+            
+            ext = os.path.splitext(file_path)[1].lower()
+            mime = "text/plain"
+            if ext == ".html":
+                mime = "text/html"
+            elif ext == ".css":
+                mime = "text/css"
+            elif ext == ".js":
+                mime = "application/javascript"
+            elif ext == ".json":
+                mime = "application/json"
+            elif ext == ".png":
+                mime = "image/png"
+            elif ext == ".jpg" or ext == ".jpeg":
+                mime = "image/jpeg"
+            elif ext == ".svg":
+                mime = "image/svg+xml"
+            elif ext == ".ico":
+                mime = "image/x-icon"
+            
+            self.serve_file(file_path, mime)
+            return
+
+        # API: Status
+        if path == "/api/status":
+            ffmpeg_path = shutil.which("ffmpeg")
+            self.send_json({
+                "status": "online",
+                "system": "OmniSight-NVR Hub",
+                "version": "1.0.0",
+                "time": time.time(),
+                "ffmpeg_available": bool(ffmpeg_path),
+                "ffmpeg_path": ffmpeg_path,
+                "active_camera_count": len(config_manager.get_all_cameras()),
+                "total_snapshots": len(recorder_manager.list_snapshots())
+            })
+            return
+
+        # API: Get all cameras
+        if path == "/api/cameras":
+            cameras = config_manager.get_all_cameras()
+            layout = config_manager.get_layout()
+            groups = config_manager.get_groups()
+            self.send_json({
+                "cameras": cameras,
+                "layout": layout,
+                "groups": groups
+            })
+            return
+
+        # API: Get single camera
+        if path.startswith("/api/cameras/") and not path.endswith("/stream") and not path.endswith("/snapshot") and not path.endswith("/ptz"):
+            cam_id = path.split("/")[3]
+            cam = config_manager.get_camera(cam_id)
+            if cam:
+                self.send_json(cam)
+            else:
+                self.send_json({"error": "Camera not found"}, 404)
+            return
+
+        # API: Stream Camera (MJPEG boundary stream)
+        if path.startswith("/api/cameras/") and path.endswith("/stream"):
+            cam_id = path.split("/")[3]
+            session = stream_manager.get_session(cam_id)
+            if not session:
+                self.send_json({"error": "Camera not found"}, 404)
+                return
+
+            self.serve_mjpeg_stream(session)
+            return
+
+        # API: Snapshot of Camera
+        if path.startswith("/api/cameras/") and path.endswith("/snapshot"):
+            cam_id = path.split("/")[3]
+            session = stream_manager.get_session(cam_id)
+            if not session:
+                self.send_json({"error": "Camera not found"}, 404)
+                return
+            frame = session.get_latest_frame()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/jpeg")
+            self.send_header("Content-Length", str(len(frame)))
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.end_headers()
+            self.wfile.write(frame)
+            return
+
+        # API: Get Presets
+        if path == "/api/presets":
+            self.send_json(VENDOR_PRESETS)
+            return
+
+        # API: Discovery Scan
+        if path == "/api/discovery/scan":
+            result = run_full_discovery()
+            self.send_json(result)
+            return
+
+        # API: Snapshots list
+        if path == "/api/snapshots":
+            snaps = recorder_manager.list_snapshots()
+            self.send_json(snaps)
+            return
+
+        # API: Serve Snapshot image file
+        if path.startswith("/api/snapshots/"):
+            filename = os.path.basename(path[len("/api/snapshots/"):])
+            filepath = os.path.join(SNAPSHOTS_DIR, filename)
+            if os.path.exists(filepath):
+                self.serve_file(filepath, "image/jpeg")
+            else:
+                self.send_json({"error": "Snapshot not found"}, 404)
+            return
+
+        self.send_json({"error": "Endpoint not found"}, 404)
+
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+        body_data = self.read_json_body()
+
+        # API: Add camera
+        if path == "/api/cameras":
+            if not body_data or "name" not in body_data:
+                self.send_json({"error": "Name is required"}, 400)
+                return
+            
+            # If vendor preset is specified, construct stream URL if missing
+            vendor = body_data.get("vendor", "generic_rtsp")
+            ip = body_data.get("ip", "")
+            if "stream_url" not in body_data or not body_data["stream_url"]:
+                body_data["stream_url"] = build_stream_url(
+                    preset_id=vendor,
+                    ip=ip,
+                    port=int(body_data.get("port", 554)),
+                    username=body_data.get("username", ""),
+                    password=body_data.get("password", ""),
+                    channel=body_data.get("channel", 1),
+                    stream_type="main"
+                )
+
+            new_cam = config_manager.add_camera(body_data)
+            stream_manager.refresh_cameras()
+            self.send_json(new_cam, 201)
+            return
+
+        # API: PTZ Control
+        if path.startswith("/api/cameras/") and path.endswith("/ptz"):
+            cam_id = path.split("/")[3]
+            session = stream_manager.get_session(cam_id)
+            if not session:
+                self.send_json({"error": "Camera not found"}, 404)
+                return
+            action = body_data.get("action", "home")
+            session.adjust_ptz(action)
+            self.send_json({
+                "status": "ok",
+                "camera_id": cam_id,
+                "action": action,
+                "pan": session.pan,
+                "tilt": session.tilt,
+                "zoom": session.zoom
+            })
+            return
+
+        # API: Capture and save snapshot
+        if path == "/api/snapshots/capture":
+            cam_id = body_data.get("camera_id")
+            if not cam_id:
+                self.send_json({"error": "camera_id is required"}, 400)
+                return
+            snap = recorder_manager.capture_snapshot(cam_id)
+            if snap:
+                self.send_json(snap, 201)
+            else:
+                self.send_json({"error": "Failed to capture snapshot"}, 500)
+            return
+
+        # API: Build Stream URL Helper
+        if path == "/api/presets/generate":
+            url = build_stream_url(
+                preset_id=body_data.get("vendor", "generic_rtsp"),
+                ip=body_data.get("ip", "192.168.1.100"),
+                port=int(body_data.get("port", 554)),
+                username=body_data.get("username", ""),
+                password=body_data.get("password", ""),
+                channel=body_data.get("channel", 1),
+                stream_type=body_data.get("stream_type", "main")
+            )
+            self.send_json({"stream_url": url})
+            return
+
+        # API: Change layout
+        if path == "/api/layout":
+            layout = body_data.get("layout", "2x2")
+            config_manager.set_layout(layout)
+            self.send_json({"status": "ok", "layout": layout})
+            return
+
+        self.send_json({"error": "Endpoint not found"}, 404)
+
+    def do_PUT(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+        body_data = self.read_json_body()
+
+        if path.startswith("/api/cameras/"):
+            cam_id = path.split("/")[3]
+            updated = config_manager.update_camera(cam_id, body_data)
+            if updated:
+                stream_manager.refresh_cameras()
+                self.send_json(updated)
+            else:
+                self.send_json({"error": "Camera not found"}, 404)
+            return
+
+        self.send_json({"error": "Endpoint not found"}, 404)
+
+    def do_DELETE(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+
+        if path.startswith("/api/cameras/"):
+            cam_id = path.split("/")[3]
+            success = config_manager.delete_camera(cam_id)
+            if success:
+                stream_manager.refresh_cameras()
+                self.send_json({"status": "deleted", "camera_id": cam_id})
+            else:
+                self.send_json({"error": "Camera not found"}, 404)
+            return
+
+        if path.startswith("/api/snapshots/"):
+            filename = os.path.basename(path[len("/api/snapshots/"):])
+            if recorder_manager.delete_snapshot(filename):
+                self.send_json({"status": "deleted", "filename": filename})
+            else:
+                self.send_json({"error": "Snapshot file not found"}, 404)
+            return
+
+        self.send_json({"error": "Endpoint not found"}, 404)
+
+    def read_json_body(self) -> Dict[str, Any]:
+        try:
+            content_length = int(self.headers.get("Content-Length", 0))
+            if content_length > 0:
+                body = self.rfile.read(content_length).decode("utf-8")
+                return json.loads(body)
+        except Exception:
+            pass
+        return {}
+
+    def serve_file(self, file_path: str, mime: str):
+        if not os.path.exists(file_path):
+            self.send_error(404, "File Not Found")
+            return
+        try:
+            with open(file_path, "rb") as f:
+                content = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", mime)
+            self.send_header("Content-Length", str(len(content)))
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            self.wfile.write(content)
+        except Exception as e:
+            self.send_error(500, f"Error reading file: {e}")
+
+    def serve_mjpeg_stream(self, session):
+        """Streams continuous multipart/x-mixed-replace JPEG frames to client."""
+        self.send_response(200)
+        self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+
+        target_fps = max(10, session.camera_info.get("fps", 25))
+        frame_interval = 1.0 / target_fps
+
+        try:
+            while True:
+                t0 = time.time()
+                frame = session.get_latest_frame()
+                
+                header = (
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpeg\r\n"
+                    b"Content-Length: " + str(len(frame)).encode("ascii") + b"\r\n\r\n"
+                )
+                self.wfile.write(header)
+                self.wfile.write(frame)
+                self.wfile.write(b"\r\n")
+
+                elapsed = time.time() - t0
+                sleep_time = max(0.01, frame_interval - elapsed)
+                time.sleep(sleep_time)
+        except (BrokenPipeError, ConnectionResetError):
+            # Client disconnected gracefully
+            pass
+        except Exception as e:
+            # Handle client close
+            pass
+
+
+def run_server(host: str = "0.0.0.0", port: int = 8080):
+    server = ThreadingHTTPServer((host, port), OmniSightHandler)
+    print("=" * 65)
+    print(f"  ✦ OmniSight-NVR Universal Surveillance Hub Online ✦")
+    print(f"  Local Web Dashboard: http://localhost:{port}")
+    print(f"  Network Dashboard:   http://0.0.0.0:{port}")
+    print(f"  Supported Hardware:  Hikvision, Dahua, Xiongmai (XM), Tapo,")
+    print(f"                       Reolink, Yoosee, V380, and Generic ONVIF")
+    print("=" * 65)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nShutting down OmniSight-NVR...")
+        server.shutdown()
+
+
+if __name__ == "__main__":
+    port = 8080
+    if len(sys.argv) > 1:
+        try:
+            port = int(sys.argv[1])
+        except ValueError:
+            pass
+    run_server(port=port)

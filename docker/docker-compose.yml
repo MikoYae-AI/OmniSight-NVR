@@ -1,0 +1,15 @@
+version: "3.8"
+
+services:
+  omnisight-nvr:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: omnisight-nvr
+    restart: unless-stopped
+    network_mode: host # Host networking is recommended for ONVIF WS-Discovery UDP multicast & RTSP
+    volumes:
+      - ../data:/app/data
+    environment:
+      - PORT=8080
+      - TZ=UTC

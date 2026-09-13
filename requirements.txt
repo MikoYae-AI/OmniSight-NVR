@@ -1,0 +1,4 @@
+# OmniSight-NVR Core Dependencies
+# The backend is built to run entirely on Python standard library!
+# Pillow is required for real-time frame generation, HUD rendering, and snapshot processing.
+Pillow>=10.0.0
