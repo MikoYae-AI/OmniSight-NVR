@@ -1,34 +1,34 @@
 # ✦ OmniSight-NVR
 
-> **The Universal Multi-Vendor Camera & NVR Surveillance Hub**  
-> *Unifying Hikvision, Dahua, Xiongmai, generic Chinese IP cams, and ONVIF devices under one high-performance, dark-aesthetic web dashboard.*
+> **The Universal Multi-Vendor CCTV & IP Camera Surveillance Hub**  
+> *Unifying Hikvision DVRs, Dahua XVRs, Xiongmai Chinese CCTV boxes, analog BNC cameras, and ONVIF streams under one high-performance web dashboard.*
 
 ---
 
 ## 👁️ The Problem OmniSight Solves
 
-In the real world, IP surveillance is a fragmented nightmare:
-- **Hikvision** locks you into *iVMS-4200* or *Hik-Connect*.
-- **Dahua** demands *SmartPSS* or *DMSS*.
-- **Generic Chinese cameras** (Xiongmai / HiSilicon / Sofia chipsets) rely on clunky ActiveX plugins, *CMS*, or shady cloud apps like *XMeye*, *V380*, or *Yoosee*.
-- **Consumer cams** (TP-Link Tapo, Reolink) trap you inside mobile apps.
+Whether you are running **analog CCTV cameras** wired via coaxial BNC cables into a DVR box or modern **IP surveillance cameras**:
+- **Hikvision CCTV DVRs / TurboHD** demand *iVMS-4200* or *Hik-Connect*.
+- **Dahua XVR / DVRs** demand *SmartPSS* or *DMSS*.
+- **Generic Chinese CCTV DVRs & Cameras** (Xiongmai / HiSilicon / Sofia chipsets) force you to use outdated Windows *CMS* software, sketchy cloud apps (*XMeye*, *V380*, *Yoosee*), or broken Internet Explorer ActiveX plugins.
+- **Consumer Wi-Fi Cams** (Tapo, Reolink) trap you inside mobile phone apps.
 
-Running 4 different vendor programs just to see your cameras is bloated, inefficient, and insecure.
-
-**OmniSight-NVR** destroys vendor lock-in. It bridges every camera brand into a single, sleek, low-latency web matrix accessible from any browser on your desktop, laptop, tablet, or phone.
+**OmniSight-NVR** destroys vendor lock-in. Whether your CCTV cameras are analog BNC lines hooked into a DVR or standalone network cameras, OmniSight bridges every channel into a single, unified web console.
 
 ---
 
 ## ⚡ Key Highlights
 
-- **Universal Protocol Ingestion**: RTSP streams, ONVIF Profile S, HTTP/MJPEG (ESP32-CAM, IP Webcam), and virtual test streams.
+- **CCTV DVR Multi-Channel Bulk Importer**: Have an 8-channel or 16-channel Hikvision or Chinese CCTV DVR box? Enter the DVR IP and provision all BNC coaxial camera channels into your web matrix simultaneously in seconds!
+- **Universal Protocol Ingestion**: RTSP streams, ONVIF Profile S, HTTP/MJPEG, USB/V4L2 capture dongles, and virtual test streams.
+- **CCTV BNC Channel Mapping**: Pre-configured channel schemes for Hikvision TurboHD (`/Streaming/Channels/101`, `201`, `301`), Chinese AHD/TVI DVRs (`/live/ch0`, `/live/ch1`), and Dahua XVRs (`channel=1`, `channel=2`).
 - **Built-in ONVIF & LAN Scanner**: One-click network scanner using WS-Discovery (UDP 3702) and signature port probing (554, 34567, 37777, 8000, 8899) to detect and identify camera chipsets automatically.
 - **Vendor Presets Database**: Automated connection string generation for Hikvision, Dahua, Xiongmai, Tapo, Reolink, V380, Yoosee, Uniview, and Axis.
-- **Ultra-Lean Zero-Dependency Core**: The backend runs purely on vanilla Python 3 standard library and Pillow. No heavyweight database or complex microservices required.
+- **Ultra-Lean Zero-Dependency Core**: The backend runs purely on vanilla Python 3 standard library and Pillow.
 - **Responsive Surveillance Matrix**: Dynamic grid layouts (1×1 focus, 2×2 quad, 3×3, 4×4) with dark gothic cybersecurity aesthetics.
 - **Virtual PTZ Joypad**: On-screen pan, tilt, and zoom controls.
 - **Instant Snapshot Capture**: High-speed still capture with built-in gallery and timestamped archive.
-- **Out-of-the-Box Simulation**: Ships with realistic procedural surveillance streams so you can explore the full UI immediately without needing physical cameras plugged in.
+- **Out-of-the-Box Simulation**: Ships with procedural surveillance streams so you can test immediately without physical hardware.
 
 ---
 
@@ -36,38 +36,42 @@ Running 4 different vendor programs just to see your cameras is bloated, ineffic
 
 ```mermaid
 flowchart TD
-    subgraph Cameras["Surveillance Hardware Sources"]
-        HIK["Hikvision IP Cams\n(RTSP 554 / ISAPI 8000)"]
-        DAH["Dahua & Imou\n(RTSP 554 / TCP 37777)"]
-        XM["Generic Chinese IP Cams\n(Xiongmai CMS 34567 / RTSP)"]
-        TAPO["TP-Link Tapo & Reolink\n(RTSP / ONVIF)"]
-        ESP["ESP32-CAM & HTTP\n(MJPEG Stream)"]
-        SIM["OmniSight Simulation Engine\n(Procedural OSD Generator)"]
+    subgraph AnalogCCTV["Analog CCTV Systems (Coaxial / BNC)"]
+        BNC1["BNC Coax Cam 1-16"] --> HIK_DVR["Hikvision TurboHD DVR\n(RTSP 554 / ISAPI 8000)"]
+        BNC2["BNC Coax Cam 1-16"] --> XM_DVR["Chinese AHD/TVI DVR\n(Xiongmai CMS 34567 / RTSP)"]
+        BNC3["BNC Coax Cam 1-16"] --> DAH_DVR["Dahua XVR / DVR\n(TCP 37777 / RTSP)"]
+    end
+
+    subgraph IPCCTV["Network CCTV & IP Cameras"]
+        IPC_HIK["Hikvision IP Cams"]
+        IPC_XM["Generic Chinese IP Cams"]
+        IPC_TAPO["Tapo & Reolink Cams"]
     end
 
     subgraph Backend["OmniSight-NVR Core (Python)"]
+        DVR_IMP["CCTV DVR Bulk Importer\n(Automated BNC Channel Provisioning)"]
         DISC["Network Discovery Engine\n(ONVIF WS-Discovery + Port Scanner)"]
-        PRESETS["Vendor Presets Database\n(URL & Credential Engine)"]
+        PRESETS["Vendor Presets Database\n(CCTV & DVR Signatures)"]
         STREAM["Stream Multiplexer & Transcoder\n(Multipart MJPEG / FFmpeg)"]
         CONFIG["Config & State Manager\n(cameras.json)"]
-        REC["Snapshot & Media Manager\n(Storage Vault)"]
+        REC["Snapshot & Media Vault"]
     end
 
     subgraph Frontend["Web Interface (HTML5 / JetBrains Mono / Cyber HUD)"]
         DASH["Live Surveillance Matrix\n(1x1, 2x2, 3x3, 4x4)"]
         PTZ["Virtual PTZ Controller"]
-        DISC_MODAL["Auto Discovery Panel"]
+        DVR_MODAL["1-Click DVR Importer"]
         GALLERY["Snapshot Gallery"]
     end
 
-    HIK --> STREAM
-    DAH --> STREAM
-    XM --> STREAM
-    TAPO --> STREAM
-    ESP --> STREAM
-    SIM --> STREAM
+    HIK_DVR --> STREAM
+    XM_DVR --> STREAM
+    DAH_DVR --> STREAM
+    IPC_HIK --> STREAM
+    IPC_XM --> STREAM
+    IPC_TAPO --> STREAM
 
-    DISC -.-> Cameras
+    DVR_IMP --> CONFIG
     STREAM --> DASH
     PTZ --> STREAM
     CONFIG --> DASH

@@ -505,6 +505,46 @@ function attachEventListeners() {
   document.getElementById("btnCloseGalleryModal").onclick = () => galleryModal.classList.add("hidden");
   document.getElementById("btnCloseGuideModal").onclick = () => vendorGuideModal.classList.add("hidden");
 
+  // DVR Modal
+  const dvrModal = document.getElementById("dvrModal");
+  const dvrForm = document.getElementById("dvrForm");
+  document.getElementById("btnImportDvr").onclick = () => dvrModal.classList.remove("hidden");
+  document.getElementById("btnCloseDvrModal").onclick = () => dvrModal.classList.add("hidden");
+  document.getElementById("btnCancelDvr").onclick = () => dvrModal.classList.add("hidden");
+
+  dvrForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const formData = new FormData(dvrForm);
+    const payload = {
+      vendor: formData.get("vendor"),
+      channels: parseInt(formData.get("channels")) || 8,
+      ip: formData.get("ip"),
+      port: parseInt(formData.get("port")) || 554,
+      username: formData.get("username") || "admin",
+      password: formData.get("password") || "",
+      label: formData.get("label") || "DVR",
+      group: formData.get("group") || "CCTV Analog"
+    };
+
+    try {
+      const res = await fetch("/api/dvr/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        const result = await res.json();
+        dvrModal.classList.add("hidden");
+        alert(`Successfully imported ${result.imported_count} CCTV BNC channels into matrix!`);
+        await fetchCameras();
+      } else {
+        alert("Failed to import DVR channels.");
+      }
+    } catch (err) {
+      alert("Error importing DVR: " + err);
+    }
+  });
+
   // Scanner
   document.getElementById("btnStartScan").onclick = startDiscoveryScan;
 

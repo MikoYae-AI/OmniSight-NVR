@@ -227,6 +227,62 @@ class OmniSightHandler(BaseHTTPRequestHandler):
             self.send_json(new_cam, 201)
             return
 
+        # API: Bulk Import CCTV DVR Channels
+        if path == "/api/dvr/import":
+            vendor = body_data.get("vendor", "hikvision_dvr")
+            ip = body_data.get("ip", "")
+            port = int(body_data.get("port", 554))
+            username = body_data.get("username", "admin")
+            password = body_data.get("password", "")
+            num_channels = int(body_data.get("channels", 4))
+            group = body_data.get("group", "CCTV DVR")
+            dvr_label = body_data.get("label", "DVR")
+
+            created_cameras = []
+            for ch in range(1, num_channels + 1):
+                main_url = build_stream_url(
+                    preset_id=vendor,
+                    ip=ip,
+                    port=port,
+                    username=username,
+                    password=password,
+                    channel=ch,
+                    stream_type="main"
+                )
+                sub_url = build_stream_url(
+                    preset_id=vendor,
+                    ip=ip,
+                    port=port,
+                    username=username,
+                    password=password,
+                    channel=ch,
+                    stream_type="sub"
+                )
+                cam_payload = {
+                    "name": f"{dvr_label} Ch {ch:02d} (BNC)",
+                    "group": group,
+                    "vendor": vendor,
+                    "channel": ch,
+                    "ip": ip,
+                    "port": port,
+                    "username": username,
+                    "password": password,
+                    "stream_url": main_url,
+                    "sub_stream_url": sub_url,
+                    "ptz": True,
+                    "is_simulated": False
+                }
+                added = config_manager.add_camera(cam_payload)
+                created_cameras.append(added)
+
+            stream_manager.refresh_cameras()
+            self.send_json({
+                "status": "ok",
+                "imported_count": len(created_cameras),
+                "cameras": created_cameras
+            }, 201)
+            return
+
         # API: PTZ Control
         if path.startswith("/api/cameras/") and path.endswith("/ptz"):
             cam_id = path.split("/")[3]

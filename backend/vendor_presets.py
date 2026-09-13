@@ -45,6 +45,44 @@ VENDOR_PRESETS: Dict[str, Dict[str, Any]] = {
         ],
         "default_channel": 1
     },
+    "hikvision_dvr": {
+        "id": "hikvision_dvr",
+        "name": "Hikvision CCTV DVR / TurboHD (Analog BNC Multi-channel)",
+        "brand": "Hikvision",
+        "default_ports": {"rtsp": 554, "http": 80, "sdk": 8000},
+        "default_credentials": {"username": "admin", "password": ""},
+        "rtsp_patterns": {
+            "main": "rtsp://{username}:{password}@{ip}:{port}/Streaming/Channels/{channel}01",
+            "sub": "rtsp://{username}:{password}@{ip}:{port}/Streaming/Channels/{channel}02",
+        },
+        "snapshot_url": "http://{username}:{password}@{ip}:{port}/ISAPI/Streaming/channels/{channel}01/picture",
+        "ptz_supported": True,
+        "quirks": [
+            "Hikvision DVR / TurboHD digitizes analog coaxial BNC cameras.",
+            "Channel 1 BNC = 101, Channel 2 BNC = 201, Channel 3 = 301, Channel 4 = 401, etc.",
+            "Sub-stream for mobile / multi-grid uses suffix 02 (e.g., 102, 202, 302)."
+        ],
+        "default_channel": 1
+    },
+    "xiongmai_dvr": {
+        "id": "xiongmai_dvr",
+        "name": "Chinese AHD/TVI/CVI DVR (Xiongmai H.264/H.265 NetSurveillance)",
+        "brand": "Xiongmai (XM)",
+        "default_ports": {"rtsp": 554, "media": 34567, "onvif": 8899, "http": 80},
+        "default_credentials": {"username": "admin", "password": ""},
+        "rtsp_patterns": {
+            "main": "rtsp://{username}:{password}@{ip}:{port}/live/ch{channel_index}",
+            "sub": "rtsp://{username}:{password}@{ip}:{port}/live/ch{channel_index}_sub",
+        },
+        "snapshot_url": "",
+        "ptz_supported": True,
+        "quirks": [
+            "Standard Chinese CCTV DVR for coaxial BNC cameras (AHD, TVI, CVI, CVBS).",
+            "Channels are 0-indexed: BNC Ch 1 = /live/ch0, BNC Ch 2 = /live/ch1, Ch 3 = /live/ch2.",
+            "Desktop software port is 34567 (CMS / XMeye). Password on 'admin' is almost always blank."
+        ],
+        "default_channel": 1
+    },
     "xiongmai": {
         "id": "xiongmai",
         "name": "Xiongmai / XM / NetSurveillance (Generic Chinese Cam)",
@@ -285,10 +323,17 @@ def build_stream_url(
     else:
         url = template
 
+    try:
+        ch_int = int(channel)
+        channel_index = max(0, ch_int - 1)
+    except (ValueError, TypeError):
+        channel_index = 0
+
     url = url.format(
         ip=ip,
         port=port,
         channel=channel,
+        channel_index=channel_index,
         subtype=0 if stream_type == "main" else 1,
         path=custom_path.lstrip("/")
     )

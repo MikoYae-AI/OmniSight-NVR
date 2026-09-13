@@ -45,6 +45,9 @@
           <button class="btn-action btn-primary" id="btnAddCamera">
             <span class="icon">+</span> ADD CAMERA
           </button>
+          <button class="btn-action btn-secondary" id="btnImportDvr">
+            <span class="icon">📼</span> IMPORT DVR
+          </button>
           <button class="btn-action btn-secondary" id="btnScanNetwork">
             <span class="icon">⚡</span> DISCOVERY
           </button>
@@ -192,6 +195,77 @@
         <div class="modal-footer">
           <button type="button" class="btn-action btn-ghost" id="btnCancelCam">Cancel</button>
           <button type="submit" class="btn-action btn-primary">Save Camera</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Import CCTV DVR / XVR Box -->
+  <div class="modal-overlay hidden" id="dvrModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3>Import Multi-Channel CCTV DVR</h3>
+        <button class="btn-close" id="btnCloseDvrModal">&times;</button>
+      </div>
+      <form id="dvrForm" class="modal-body">
+        <p class="section-desc">Instantly provision all BNC coaxial channels from your physical CCTV DVR box (4, 8, 16, or 32 channels) into your matrix simultaneously.</p>
+
+        <div class="form-row">
+          <div class="form-group flex-2">
+            <label for="dvrVendor">DVR Architecture</label>
+            <select id="dvrVendor" name="vendor" class="select-vendor">
+              <option value="hikvision_dvr">Hikvision TurboHD / CCTV DVR (DS-7100 / 7200)</option>
+              <option value="xiongmai_dvr">Chinese AHD / TVI / CVI DVR (NetSurveillance / H.264 / XM)</option>
+              <option value="dahua">Dahua XVR / Cooper CCTV DVR</option>
+            </select>
+          </div>
+          <div class="form-group flex-1">
+            <label for="dvrChannels">BNC Channels</label>
+            <select id="dvrChannels" name="channels">
+              <option value="4">4 Channels</option>
+              <option value="8" selected>8 Channels</option>
+              <option value="16">16 Channels</option>
+              <option value="32">32 Channels</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group flex-2">
+            <label for="dvrIp">DVR IP Address</label>
+            <input type="text" id="dvrIp" name="ip" required placeholder="192.168.1.64">
+          </div>
+          <div class="form-group flex-1">
+            <label for="dvrPort">RTSP Port</label>
+            <input type="number" id="dvrPort" name="port" value="554">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label for="dvrUser">DVR Username</label>
+            <input type="text" id="dvrUser" name="username" value="admin">
+          </div>
+          <div class="form-group flex-1">
+            <label for="dvrPass">DVR Password</label>
+            <input type="password" id="dvrPass" name="password" placeholder="••••••••">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label for="dvrLabel">Label Prefix</label>
+            <input type="text" id="dvrLabel" name="label" value="CCTV DVR" placeholder="e.g. Warehouse DVR">
+          </div>
+          <div class="form-group flex-1">
+            <label for="dvrGroup">Group / Zone</label>
+            <input type="text" id="dvrGroup" name="group" value="CCTV Analog" placeholder="CCTV Analog">
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn-action btn-ghost" id="btnCancelDvr">Cancel</button>
+          <button type="submit" class="btn-action btn-primary">Import All Channels</button>
         </div>
       </form>
     </div>
