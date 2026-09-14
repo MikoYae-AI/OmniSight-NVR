@@ -61,6 +61,22 @@ class TestAuthAndConfigManager(unittest.TestCase):
         session = self.config_mgr.authenticate_user("admin", "newsecret456")
         self.assertIsNotNone(session)
 
+    def test_google_user_auth(self):
+        session = self.config_mgr.authenticate_google_user("user@example.com", name="Google User", picture="https://example.com/pic.jpg")
+        self.assertIsNotNone(session)
+        self.assertEqual(session["email"], "user@example.com")
+        self.assertEqual(session["username"], "user")
+        self.assertIn("token", session)
+
+        # Validate token
+        validated = self.config_mgr.validate_session(session["token"])
+        self.assertIsNotNone(validated)
+        self.assertEqual(validated["email"], "user@example.com")
+
+    def test_google_client_id_config(self):
+        self.config_mgr.set_google_client_id("test-client-id-123.apps.googleusercontent.com")
+        self.assertEqual(self.config_mgr.get_google_client_id(), "test-client-id-123.apps.googleusercontent.com")
+
 
 if __name__ == "__main__":
     unittest.main()

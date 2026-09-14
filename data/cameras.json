@@ -2,7 +2,7 @@
   "version": "1.0.0",
   "system_name": "OmniSight-NVR Hub",
   "theme": "dark_gothic",
-  "grid_layout": "2x2",
+  "grid_layout": "1x1",
   "cameras": [
     {
       "id": "cam-hikvision-13",
@@ -15,15 +15,36 @@
       "password": "",
       "stream_url": "rtsp://admin:@192.168.1.13:554/Streaming/Channels/101",
       "sub_stream_url": "rtsp://admin:@192.168.1.13:554/Streaming/Channels/102",
-      "snapshot_url": "http://admin:@192.168.1.13/ISAPI/Streaming/channels/101/picture",
+      "snapshot_url": "http://192.168.1.13/ISAPI/Streaming/channels/101/picture",
       "channel": 1,
       "is_simulated": false,
       "legacy_polling": true,
       "status": "online",
       "fps": 25,
       "resolution": "1920x1080",
-      "ptz": false,
+      "ptz": true,
       "notes": "Hikvision 2MP Cube IP Camera (DS-2CD2420F-IW, R6 Platform)."
+    },
+    {
+      "id": "cam-gatocam-01",
+      "name": "Shenzhen GatoCam (All Variants)",
+      "vendor": "gatocam",
+      "group": "Perimeter",
+      "ip": "192.168.1.10",
+      "port": 554,
+      "username": "admin",
+      "password": "",
+      "stream_url": "rtsp://admin:@192.168.1.10:554/live/ch0",
+      "sub_stream_url": "rtsp://admin:@192.168.1.10:554/live/ch1",
+      "snapshot_url": "http://192.168.1.10/snapshot.jpg",
+      "channel": 0,
+      "is_simulated": true,
+      "legacy_polling": true,
+      "status": "online",
+      "fps": 25,
+      "resolution": "1920x1080",
+      "ptz": true,
+      "notes": "Shenzhen GatoCam / XM OEM security camera. Supports Zero-IE snapshot polling and OpenIPC."
     },
     {
       "id": "cam-xiongmai-02",
@@ -89,7 +110,8 @@
     "Backyard",
     "Driveway",
     "Indoor",
-    "Warehouse"
+    "Warehouse",
+    "Default"
   ],
   "recordings_path": "/home/nimuthu/OmniSight-NVR/data/recordings",
   "snapshots_path": "/home/nimuthu/OmniSight-NVR/data/snapshots",

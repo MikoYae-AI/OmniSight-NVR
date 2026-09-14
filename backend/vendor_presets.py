@@ -104,6 +104,30 @@ VENDOR_PRESETS: Dict[str, Dict[str, Any]] = {
         ],
         "default_channel": 0
     },
+    "gatocam": {
+        "id": "gatocam",
+        "name": "Shenzhen GatoCam (Indoor / Outdoor / PTZ)",
+        "brand": "Shenzhen Gato",
+        "default_ports": {"rtsp": 554, "http": 80, "onvif": 8899, "media": 34567},
+        "default_credentials": {"username": "admin", "password": ""},
+        "rtsp_patterns": {
+            "main": "rtsp://{username}:{password}@{ip}:{port}/live/ch0",
+            "sub": "rtsp://{username}:{password}@{ip}:{port}/live/ch1",
+            "stream1": "rtsp://{username}:{password}@{ip}:{port}/stream1",
+            "onvif1": "rtsp://{username}:{password}@{ip}:{port}/onvif1"
+        },
+        "snapshot_url": "http://{username}:{password}@{ip}:{port}/snapshot.jpg",
+        "ptz_supported": True,
+        "quirks": [
+            "Shenzhen Gato / XM / Sofia OEM architecture with HiSilicon/Goke SoC.",
+            "Primary RTSP pattern: rtsp://<ip>:554/live/ch0 or /stream1.",
+            "Legacy Snapshot URL: http://<ip>/snapshot.jpg or http://<ip>/tmpfs/auto.jpg.",
+            "Default password is empty or '123456' / 'admin'.",
+            "Zero-IE HTML5 engine bypasses required ActiveX plugins.",
+            "Eligible for OpenIPC flashing (HiSilicon Hi3516 / XM530) for full cloud-free autonomy."
+        ],
+        "default_channel": 0
+    },
     "tapo": {
         "id": "tapo",
         "name": "TP-Link Tapo (C100, C200, C310, C500)",

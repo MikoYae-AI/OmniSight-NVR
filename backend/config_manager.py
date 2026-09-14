@@ -103,6 +103,7 @@ DEFAULT_CONFIG = {
     "cameras": DEFAULT_CAMERAS,
     "groups": ["All", "Perimeter", "Backyard", "Driveway", "Indoor", "Warehouse"],
     "users": [],
+    "google_client_id": os.environ.get("GOOGLE_CLIENT_ID", ""),
     "recordings_path": os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "recordings")),
     "snapshots_path": os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "snapshots"))
 }
@@ -218,6 +219,58 @@ class ConfigManager:
             user["salt"] = new_salt_hex
             self._save()
             return True
+
+    def get_google_client_id(self) -> str:
+        with self._lock:
+            return self.data.get("google_client_id") or os.environ.get("GOOGLE_CLIENT_ID", "")
+
+    def set_google_client_id(self, client_id: str):
+        with self._lock:
+            self.data["google_client_id"] = client_id.strip()
+            self._save()
+
+    def authenticate_google_user(self, email: str, name: str = "", picture: str = "") -> Dict[str, Any]:
+        with self._lock:
+            users = self.data.setdefault("users", [])
+            email_lower = email.strip().lower()
+            user = next((u for u in users if u.get("email", "").lower() == email_lower), None)
+            
+            if not user:
+                username_candidate = email_lower.split("@")[0]
+                user = next((u for u in users if u.get("username", "").lower() == username_candidate), None)
+
+            if not user:
+                user = {
+                    "username": email_lower.split("@")[0],
+                    "email": email_lower,
+                    "name": name or email_lower.split("@")[0],
+                    "picture": picture,
+                    "auth_type": "google",
+                    "created_at": int(time.time())
+                }
+                users.append(user)
+            else:
+                user["email"] = email_lower
+                if name:
+                    user["name"] = name
+                if picture:
+                    user["picture"] = picture
+
+            self._save()
+
+            token = secrets.token_hex(32)
+            expires_at = time.time() + SESSION_TTL_SECONDS
+            session_info = {
+                "token": token,
+                "username": user.get("username", email_lower.split("@")[0]),
+                "email": email_lower,
+                "name": user.get("name", ""),
+                "picture": user.get("picture", ""),
+                "auth_type": "google",
+                "expires_at": expires_at
+            }
+            self._sessions[token] = session_info
+            return session_info
 
     # --- Camera & Layout Methods ---
 

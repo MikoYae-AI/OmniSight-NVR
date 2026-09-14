@@ -58,6 +58,38 @@ class TestServerAuthEndpoints(unittest.TestCase):
             cams_data = json.loads(resp.read().decode("utf-8"))
             self.assertIn("cameras", cams_data)
 
+    def test_google_auth_endpoint(self):
+        orig_verifier = server_mod.verify_google_token
+        try:
+            server_mod.verify_google_token = lambda token, client_id="": {
+                "email": "testuser@gmail.com",
+                "name": "Test User",
+                "picture": "https://lh3.googleusercontent.com/a/test"
+            } if token == "valid_mock_token" else None
+
+            url = f"http://127.0.0.1:{self.port}/api/auth/google"
+
+            # Invalid token
+            bad_data = json.dumps({"credential": "bad_token"}).encode("utf-8")
+            bad_req = urllib.request.Request(url, data=bad_data, headers={"Content-Type": "application/json"}, method="POST")
+            try:
+                urllib.request.urlopen(bad_req)
+                self.fail("Should have returned 401 for bad token")
+            except urllib.error.HTTPError as e:
+                self.assertEqual(e.code, 401)
+
+            # Valid token
+            good_data = json.dumps({"credential": "valid_mock_token"}).encode("utf-8")
+            good_req = urllib.request.Request(url, data=good_data, headers={"Content-Type": "application/json"}, method="POST")
+            with urllib.request.urlopen(good_req) as resp:
+                self.assertEqual(resp.status, 200)
+                res = json.loads(resp.read().decode("utf-8"))
+                self.assertEqual(res["status"], "ok")
+                self.assertEqual(res["email"], "testuser@gmail.com")
+                self.assertIn("token", res)
+        finally:
+            server_mod.verify_google_token = orig_verifier
+
 
 if __name__ == "__main__":
     unittest.main()

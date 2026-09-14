@@ -5,6 +5,19 @@
  */
 
 const IS_GITHUB_PAGES = window.location.hostname.includes("github.io") || window.location.protocol === "file:";
+let hubBaseUrl = "";
+function apiUrl(path) {
+  return `${hubBaseUrl}${path}`;
+}
+function escapeHtml(str) {
+  if (!str) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
 let localApiAvailable = false;
 let cameras = [];
 let vendorPresets = {};
@@ -19,7 +32,7 @@ let authToken = sessionStorage.getItem("omnisight_token") || localStorage.getIte
 const DEFAULT_CLIENT_CAMERAS = [
   {
     id: "cam-hikvision-13",
-    name: "Hikvision DS-2CD2420F-IW",
+    name: "Hikvision DS-2CD2420F-IW (Live)",
     vendor: "hikvision",
     group: "Living Area",
     ip: "192.168.1.13",
@@ -28,15 +41,36 @@ const DEFAULT_CLIENT_CAMERAS = [
     password: "",
     stream_url: "rtsp://admin:@192.168.1.13:554/Streaming/Channels/101",
     sub_stream_url: "rtsp://admin:@192.168.1.13:554/Streaming/Channels/102",
-    snapshot_url: "http://admin:@192.168.1.13/ISAPI/Streaming/channels/101/picture",
+    snapshot_url: "http://192.168.1.13/ISAPI/Streaming/channels/101/picture",
     channel: 1,
     is_simulated: false,
     legacy_polling: true,
     status: "online",
     fps: 25,
     resolution: "1920x1080",
-    ptz: false,
+    ptz: true,
     notes: "Hikvision 2MP Cube IP Camera (DS-2CD2420F-IW, R6 Platform)."
+  },
+  {
+    id: "cam-gatocam-01",
+    name: "Shenzhen GatoCam (All Variants)",
+    vendor: "gatocam",
+    group: "Perimeter",
+    ip: "192.168.1.10",
+    port: 554,
+    username: "admin",
+    password: "",
+    stream_url: "rtsp://admin:@192.168.1.10:554/live/ch0",
+    sub_stream_url: "rtsp://admin:@192.168.1.10:554/live/ch1",
+    snapshot_url: "http://192.168.1.10/snapshot.jpg",
+    channel: 0,
+    is_simulated: true,
+    status: "online",
+    fps: 25,
+    resolution: "1920x1080",
+    ptz: true,
+    legacy_polling: true,
+    notes: "Shenzhen GatoCam / XM OEM security camera. Supports Zero-IE snapshot polling and OpenIPC."
   },
   {
     id: "cam-xiongmai-02",
@@ -134,6 +168,22 @@ const BUILTIN_PRESETS = {
     "snapshot_pattern": "http://{username}:{password}@{ip}:{port}/snapshot.jpg",
     "default_channel": 1,
     "quirks": ["BNC Ch 1 = /live/ch0, BNC Ch 2 = /live/ch1, Ch 3 = /live/ch2. Desktop CMS port is 34567."]
+  },
+  "gatocam": {
+    "name": "Shenzhen GatoCam (Indoor / Outdoor / PTZ)",
+    "default_ports": { "rtsp": 554, "media": 34567, "onvif": 8899, "http": 80 },
+    "default_credentials": { "username": "admin", "password": "" },
+    "rtsp_patterns": { "main": "rtsp://{username}:{password}@{ip}:{port}/live/ch0" },
+    "snapshot_pattern": "http://{username}:{password}@{ip}:{port}/snapshot.jpg",
+    "default_channel": 0,
+    "quirks": [
+      "Shenzhen Gato / XM / Sofia OEM architecture with HiSilicon/Goke SoC.",
+      "Primary RTSP pattern: rtsp://<ip>:554/live/ch0 or /stream1.",
+      "Legacy Snapshot URL: http://<ip>/snapshot.jpg or http://<ip>/tmpfs/auto.jpg.",
+      "Default password is empty or '123456' / 'admin'.",
+      "Zero-IE HTML5 engine bypasses required ActiveX plugins.",
+      "Eligible for OpenIPC flashing (HiSilicon Hi3516 / XM530) for full cloud-free autonomy."
+    ]
   },
   "dahua": {
     "name": "Dahua / Imou (IPC / WizSense / XVR)",
@@ -263,7 +313,8 @@ async function authFetch(url, options = {}) {
   if (authToken) {
     options.headers["Authorization"] = `Bearer ${authToken}`;
   }
-  const res = await fetch(url, options);
+  const targetUrl = url.startsWith("http") ? url : apiUrl(url);
+  const res = await fetch(targetUrl, options);
   if (res.status === 401 && localApiAvailable) {
     // Unauthorized: prompt login modal
     updateAuthUI(false);
@@ -286,53 +337,221 @@ function updateAuthUI(authenticated, username = "admin") {
   }
 }
 
-// Detect Local Python Backend vs Standalone GitHub Pages Mode
-async function detectBackend() {
-  try {
-    const res = await fetch("/api/status", { cache: "no-cache" });
-    if (res.ok) {
-      const status = await res.json();
-      localApiAvailable = true;
-      appModeBadge.textContent = "LOCAL HUB ONLINE";
-      appModeBadge.style.background = "rgba(16, 185, 129, 0.15)";
-      appModeBadge.style.borderColor = "var(--accent-green)";
-      appModeBadge.style.color = "var(--accent-green)";
-      hubModeText.textContent = "Connected to Python NVR Hub (:8080)";
-      backendBridgeStatus.textContent = "Local Server Mode: Full Hardware Multiplexing Active";
+// Google Identity Services (GIS) Client
+let googleClientId = "";
+let isGoogleAuthInitialized = false;
 
-      if (status.ffmpeg_available) {
-        ffmpegStatus.textContent = "RTSP Transcoder: FFmpeg Hardware Active";
-        ffmpegStatus.style.color = "var(--accent-green)";
-      } else {
-        ffmpegStatus.textContent = "RTSP Engine: Standalone Engine Active";
-      }
+function initGoogleAuth(clientId) {
+  if (clientId) {
+    googleClientId = clientId;
+    localStorage.setItem("omnisight_google_client_id", clientId);
+  } else {
+    googleClientId = localStorage.getItem("omnisight_google_client_id") || "";
+  }
 
-      // Check current session
-      if (authToken) {
-        const meRes = await authFetch("/api/auth/me");
-        if (meRes.ok) {
-          const me = await meRes.json();
-          if (me.authenticated) {
-            updateAuthUI(true, me.username);
-          } else {
-            authToken = "";
-            sessionStorage.removeItem("omnisight_token");
-            localStorage.removeItem("omnisight_token");
-            updateAuthUI(false);
-            loginModal.classList.remove("hidden");
-          }
+  const container = document.getElementById("googleBtnContainer");
+  if (!container) return;
+
+  if (!window.google || !window.google.accounts || !window.google.accounts.id) {
+    setTimeout(() => initGoogleAuth(googleClientId), 400);
+    renderCustomGoogleButton();
+    return;
+  }
+
+  if (googleClientId) {
+    try {
+      google.accounts.id.initialize({
+        client_id: googleClientId,
+        callback: handleGoogleCredentialResponse,
+        auto_select: false,
+        cancel_on_tap_outside: true
+      });
+      container.innerHTML = "";
+      google.accounts.id.renderButton(container, {
+        theme: "outline",
+        size: "large",
+        type: "standard",
+        shape: "pill",
+        text: "signin_with",
+        logo_alignment: "left",
+        width: 280
+      });
+      isGoogleAuthInitialized = true;
+      return;
+    } catch (err) {
+      console.warn("[GoogleAuth] GIS render failed, falling back to custom button:", err);
+    }
+  }
+
+  renderCustomGoogleButton();
+}
+
+function renderCustomGoogleButton() {
+  const container = document.getElementById("googleBtnContainer");
+  if (!container) return;
+  if (container.querySelector("#btnCustomGoogleLogin")) return;
+
+  container.innerHTML = `
+    <button type="button" id="btnCustomGoogleLogin" class="btn-google-signin" title="Sign in with Google Account">
+      <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
+        <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+        <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+        <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+        <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+        <path fill="none" d="M0 0h48v48H0z"/>
+      </svg>
+      <span>Sign in with Google</span>
+    </button>
+  `;
+
+  const btn = document.getElementById("btnCustomGoogleLogin");
+  if (btn) {
+    btn.onclick = async () => {
+      if (!googleClientId) {
+        const inputId = prompt(
+          "Google OAuth Client ID is required for Google Sign-In.\nEnter your Google Client ID (e.g. xxxxx.apps.googleusercontent.com):",
+          ""
+        );
+        if (!inputId || !inputId.trim()) return;
+        googleClientId = inputId.trim();
+        localStorage.setItem("omnisight_google_client_id", googleClientId);
+        if (localApiAvailable) {
+          try {
+            await authFetch("/api/auth/google-config", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ client_id: googleClientId })
+            });
+          } catch (e) {}
+        }
+        initGoogleAuth(googleClientId);
+        if (window.google && window.google.accounts && window.google.accounts.id) {
+          google.accounts.id.prompt();
         }
       } else {
-        updateAuthUI(false);
-        loginModal.classList.remove("hidden");
+        if (window.google && window.google.accounts && window.google.accounts.id) {
+          google.accounts.id.prompt();
+        }
       }
+    };
+  }
+}
 
-      await fetchPresets();
-      await fetchCameras();
-      return;
+async function handleGoogleCredentialResponse(response) {
+  if (!response || !response.credential) {
+    loginAlert.textContent = "No Google credential received.";
+    loginAlert.classList.remove("hidden");
+    return;
+  }
+
+  if (localApiAvailable) {
+    try {
+      loginAlert.classList.add("hidden");
+      const res = await fetch(apiUrl("/api/auth/google"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ credential: response.credential, client_id: googleClientId })
+      });
+      const data = await res.json();
+      if (res.ok && data.token) {
+        authToken = data.token;
+        sessionStorage.setItem("omnisight_token", authToken);
+        localStorage.setItem("omnisight_token", authToken);
+        updateAuthUI(true, data.name || data.username || data.email);
+        loginModal.classList.add("hidden");
+        showNotification(`Welcome, ${data.name || data.username}!`, "success");
+        await fetchCameras();
+      } else {
+        loginAlert.textContent = data.error || "Google authentication failed on server.";
+        loginAlert.classList.remove("hidden");
+      }
+    } catch (err) {
+      loginAlert.textContent = "Network error during Google authentication.";
+      loginAlert.classList.remove("hidden");
     }
+    return;
+  }
+
+  // Standalone / GitHub Pages Mode
+  try {
+    const base64Url = response.credential.split('.')[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(atob(base64).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
+    const payload = JSON.parse(jsonPayload);
+    sessionStorage.setItem("omnisight_unlocked", "true");
+    updateAuthUI(true, payload.name || payload.email || "Google User");
+    loginModal.classList.add("hidden");
+    showNotification(`Welcome, ${payload.name || "Google User"}!`, "success");
+    renderGrid();
   } catch (e) {
-    // Running on GitHub Pages without local backend
+    sessionStorage.setItem("omnisight_unlocked", "true");
+    updateAuthUI(true, "Google User");
+    loginModal.classList.add("hidden");
+    renderGrid();
+  }
+}
+
+// Detect Local Python Backend vs Standalone GitHub Pages Mode
+async function detectBackend() {
+  const candidates = [
+    "", // relative (localhost or direct tunnel origin)
+    localStorage.getItem("omnisight_hub_url") || "",
+    "https://vacation-surveys-citation-ourselves.trycloudflare.com",
+    "http://localhost:8080",
+    "http://127.0.0.1:8080"
+  ].filter((u, i, arr) => arr.indexOf(u) === i && (u !== "" || !IS_GITHUB_PAGES));
+
+  for (const candidate of candidates) {
+    try {
+      const probeUrl = candidate ? `${candidate}/api/status` : "/api/status";
+      const res = await fetch(probeUrl, { cache: "no-cache", mode: "cors" });
+      if (res.ok) {
+        const status = await res.json();
+        hubBaseUrl = candidate;
+        localApiAvailable = true;
+        const isTunnel = candidate.includes("trycloudflare.com");
+        appModeBadge.textContent = isTunnel ? "SECURE TUNNEL ONLINE" : "LOCAL HUB ONLINE";
+        appModeBadge.style.background = "rgba(16, 185, 129, 0.15)";
+        appModeBadge.style.borderColor = "var(--accent-green)";
+        appModeBadge.style.color = "var(--accent-green)";
+        hubModeText.textContent = isTunnel ? "Connected via Cloudflare Secure Tunnel" : "Connected to Python NVR Hub (:8080)";
+        backendBridgeStatus.textContent = isTunnel ? `Cloudflare Tunnel Active (${candidate})` : "Local Server Mode: Full Hardware Multiplexing Active";
+
+        if (status.ffmpeg_available) {
+          ffmpegStatus.textContent = "RTSP Transcoder: FFmpeg Hardware Active";
+          ffmpegStatus.style.color = "var(--accent-green)";
+        } else {
+          ffmpegStatus.textContent = "RTSP Engine: Standalone Engine Active";
+        }
+
+        // Check current session
+        if (authToken) {
+          const meRes = await authFetch("/api/auth/me");
+          if (meRes.ok) {
+            const me = await meRes.json();
+            if (me.authenticated) {
+              updateAuthUI(true, me.username);
+            } else {
+              authToken = "";
+              sessionStorage.removeItem("omnisight_token");
+              localStorage.removeItem("omnisight_token");
+              updateAuthUI(false);
+              loginModal.classList.remove("hidden");
+            }
+          }
+        } else {
+          updateAuthUI(false);
+          loginModal.classList.remove("hidden");
+        }
+
+        initGoogleAuth(status.google_client_id);
+        await fetchPresets();
+        await fetchCameras();
+        return;
+      }
+    } catch (e) {
+      // Continue probing next candidate
+    }
   }
 
   // Fallback to GitHub Pages Standalone Client Mode
@@ -356,6 +575,7 @@ async function detectBackend() {
     updateAuthUI(true, "Guest");
   }
 
+  initGoogleAuth();
   vendorPresets = BUILTIN_PRESETS;
   loadLocalCameras();
 }
@@ -500,28 +720,34 @@ function renderGrid() {
     const vendorClass = (cam.vendor || "generic").replace("_dvr", "");
     const isLegacy = cam.legacy_polling || cam.vendor === "legacy_activex";
 
+    const safeName = escapeHtml(cam.name);
+    const safeId = escapeHtml(cam.id);
+    const safeGroup = escapeHtml(cam.group || "Default");
+    const safeIp = escapeHtml(cam.ip || "");
+
     card.innerHTML = `
       <div class="card-header">
         <div class="card-title-group">
           <span class="cam-status-dot"></span>
-          <span class="cam-name" title="${cam.name}">${cam.name}</span>
-          <span class="vendor-tag ${vendorClass}">${cam.vendor || "CAM"}</span>
+          <span class="cam-name" title="${safeName}">${safeName}</span>
+          <span class="vendor-tag ${vendorClass}">${escapeHtml(cam.vendor || "CAM")}</span>
           ${isLegacy ? `<span class="badge-legacy" title="ActiveX bypassed: HTML5 snapshot polling">NO-IE</span>` : ''}
         </div>
         <div class="card-actions">
-          <button class="btn-icon" title="Take Snapshot" onclick="captureSnapshot('${cam.id}', '${cam.name}')">📷</button>
-          ${cam.ptz ? `<button class="btn-icon" title="PTZ Controls" onclick="openPtz('${cam.id}', '${cam.name}')">🎮</button>` : ''}
-          <button class="btn-icon" title="Edit Camera" onclick="openEditCameraModal('${cam.id}')">⚙️</button>
-          <button class="btn-icon" title="Delete Camera" onclick="deleteCamera('${cam.id}')">🗑️</button>
+          <button class="btn-icon" title="Maximize View" onclick="toggleFocus('${safeId}')">⛶</button>
+          <button class="btn-icon" title="Take Snapshot" onclick="captureSnapshot('${safeId}', '${safeName}')">📷</button>
+          ${cam.ptz ? `<button class="btn-icon" title="PTZ Controls" onclick="openPtz('${safeId}', '${safeName}')">🎮</button>` : ''}
+          <button class="btn-icon" title="Edit Camera" onclick="openEditCameraModal('${safeId}')">⚙️</button>
+          <button class="btn-icon" title="Delete Camera" onclick="deleteCamera('${safeId}')">🗑️</button>
         </div>
       </div>
-      <div class="video-container" id="videoContainer-${cam.id}" ondblclick="toggleFocus('${cam.id}')">
+      <div class="video-container" id="videoContainer-${safeId}" ondblclick="toggleFocus('${safeId}')">
         <!-- Live feed rendered here -->
-        <div class="video-overlay-hud">${cam.resolution || "1080p"} • ${cam.fps || 25} FPS</div>
+        <div class="video-overlay-hud">${escapeHtml(cam.resolution || "1080p")} • ${cam.fps || 25} FPS</div>
       </div>
       <div class="card-footer">
-        <span>${cam.ip ? `IP: ${cam.ip}` : "Stream"}</span>
-        <span>${cam.group || "Default"}</span>
+        <span>${safeIp ? `IP: ${safeIp}` : "Stream"}</span>
+        <span>${safeGroup}</span>
       </div>
     `;
     cameraGrid.appendChild(card);
@@ -1110,6 +1336,7 @@ function attachEventListeners() {
   btnLoginNav.onclick = () => {
     loginAlert.classList.add("hidden");
     loginModal.classList.remove("hidden");
+    initGoogleAuth(googleClientId);
   };
 
   document.getElementById("btnCloseLoginModal").onclick = () => loginModal.classList.add("hidden");
@@ -1122,7 +1349,7 @@ function attachEventListeners() {
 
     if (localApiAvailable) {
       try {
-        const res = await fetch("/api/auth/login", {
+        const res = await fetch(apiUrl("/api/auth/login"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ username, password })
@@ -1486,4 +1713,84 @@ function attachEventListeners() {
 
   // Auto URL on IP blur
   document.getElementById("camIp").addEventListener("blur", autoGenerateUrl);
+
+  // Mobile Bottom Tab Bar Handlers
+  const mobileMenuModal = document.getElementById("mobileMenuModal");
+  const mTabFeeds = document.getElementById("mTabFeeds");
+  const mTabAdd = document.getElementById("mTabAdd");
+  const mTabScan = document.getElementById("mTabScan");
+  const mTabGallery = document.getElementById("mTabGallery");
+  const mTabMore = document.getElementById("mTabMore");
+
+  if (mTabFeeds) {
+    mTabFeeds.onclick = () => {
+      document.querySelectorAll(".mobile-tab-btn").forEach(b => b.classList.remove("active"));
+      mTabFeeds.classList.add("active");
+      document.querySelector(".grid-viewport")?.scrollTo({ top: 0, behavior: "smooth" });
+    };
+  }
+
+  if (mTabAdd) {
+    mTabAdd.onclick = () => {
+      openAddCameraModal();
+    };
+  }
+
+  if (mTabScan) {
+    mTabScan.onclick = () => {
+      discoveryModal.classList.remove("hidden");
+    };
+  }
+
+  if (mTabGallery) {
+    mTabGallery.onclick = () => {
+      galleryModal.classList.remove("hidden");
+    };
+  }
+
+  if (mTabMore) {
+    mTabMore.onclick = () => {
+      mobileMenuModal?.classList.remove("hidden");
+    };
+  }
+
+  // Mobile Quick Menu Drawer Actions
+  document.getElementById("btnCloseMobileMenuModal")?.addEventListener("click", () => {
+    mobileMenuModal?.classList.add("hidden");
+  });
+
+  document.getElementById("sheetAddCamera")?.addEventListener("click", () => {
+    mobileMenuModal?.classList.add("hidden");
+    openAddCameraModal();
+  });
+
+  document.getElementById("sheetImportDvr")?.addEventListener("click", () => {
+    mobileMenuModal?.classList.add("hidden");
+    dvrModal.classList.remove("hidden");
+  });
+
+  document.getElementById("sheetScanNetwork")?.addEventListener("click", () => {
+    mobileMenuModal?.classList.add("hidden");
+    discoveryModal.classList.remove("hidden");
+  });
+
+  document.getElementById("sheetFirmwareHub")?.addEventListener("click", () => {
+    mobileMenuModal?.classList.add("hidden");
+    firmwareModal.classList.remove("hidden");
+  });
+
+  document.getElementById("sheetCamControl")?.addEventListener("click", () => {
+    mobileMenuModal?.classList.add("hidden");
+    camControlModal.classList.remove("hidden");
+  });
+
+  document.getElementById("sheetVendorGuide")?.addEventListener("click", () => {
+    mobileMenuModal?.classList.add("hidden");
+    vendorGuideModal.classList.remove("hidden");
+  });
+
+  document.getElementById("sheetOpenGallery")?.addEventListener("click", () => {
+    mobileMenuModal?.classList.add("hidden");
+    galleryModal.classList.remove("hidden");
+  });
 }

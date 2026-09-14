@@ -2,12 +2,16 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#000000">
   <title>OmniSight-NVR ✦ Universal CCTV & Camera Hub</title>
-  <link rel="stylesheet" href="./static/css/style.css">
+  <link rel="stylesheet" href="./static/css/style.css?v=2.2.0">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Cinzel:wght@500;700&display=swap" rel="stylesheet">
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body class="theme-gothic">
   <div class="app-container">
@@ -98,7 +102,7 @@
       </div>
     </main>
 
-    <!-- Footer Telemetry -->
+    <!-- Footer Telemetry (Desktop Only) -->
     <footer class="app-footer">
       <div class="footer-meta">
         <span>OmniSight Core v1.1.0</span>
@@ -111,6 +115,30 @@
         <span class="quote">"Right here, right now... every camera brought into obedience."</span>
       </div>
     </footer>
+
+    <!-- Native iOS Mobile Tab Bar -->
+    <nav class="mobile-tab-bar" id="mobileTabBar">
+      <button class="mobile-tab-btn active" id="mTabFeeds" title="Cameras">
+        <span class="m-tab-icon">📹</span>
+        <span class="m-tab-label">Feeds</span>
+      </button>
+      <button class="mobile-tab-btn" id="mTabAdd" title="Add Camera">
+        <span class="m-tab-icon">➕</span>
+        <span class="m-tab-label">Add Cam</span>
+      </button>
+      <button class="mobile-tab-btn" id="mTabScan" title="Scan Network">
+        <span class="m-tab-icon">⚡</span>
+        <span class="m-tab-label">Discovery</span>
+      </button>
+      <button class="mobile-tab-btn" id="mTabGallery" title="Snapshots">
+        <span class="m-tab-icon">🖼️</span>
+        <span class="m-tab-label">Gallery</span>
+      </button>
+      <button class="mobile-tab-btn" id="mTabMore" title="More Tools">
+        <span class="m-tab-icon">☰</span>
+        <span class="m-tab-label">Menu</span>
+      </button>
+    </nav>
   </div>
 
   <!-- MODAL: System Login -->
@@ -124,6 +152,16 @@
         <p class="section-desc">Sign in to access live multi-camera streams, control PTZ hardware, and manage NVR settings.</p>
 
         <div class="auth-alert hidden" id="loginAlert"></div>
+
+        <!-- Google Sign-In Container -->
+        <div class="google-auth-section" id="googleAuthSection" style="margin-bottom: 14px; text-align: center;">
+          <div id="googleBtnContainer" style="display: flex; justify-content: center; min-height: 40px;"></div>
+          <div class="auth-or-divider" style="display: flex; align-items: center; width: 100%; gap: 10px; color: var(--text-secondary); font-size: 11px; margin: 10px 0;">
+            <span style="flex: 1; height: 1px; background: rgba(255, 255, 255, 0.1);"></span>
+            <span>or sign in with password</span>
+            <span style="flex: 1; height: 1px; background: rgba(255, 255, 255, 0.1);"></span>
+          </div>
+        </div>
 
         <div class="form-group">
           <label for="loginUser">Username</label>
@@ -214,6 +252,7 @@
               <option value="hikvision_dvr">Hikvision CCTV DVR / TurboHD (Analog BNC)</option>
               <option value="xiongmai">Xiongmai / XM / CMS (Generic Chinese Cam)</option>
               <option value="xiongmai_dvr">Chinese AHD/TVI CCTV DVR (NetSurveillance)</option>
+              <option value="gatocam">Shenzhen GatoCam (Indoor / Outdoor / PTZ)</option>
               <option value="dahua">Dahua / Imou (IPC / WizSense / XVR)</option>
               <option value="tapo">TP-Link Tapo (C100 / C200 / C310)</option>
               <option value="reolink">Reolink (RLC / Duo / E1)</option>
@@ -601,8 +640,67 @@
         PAN: +000.0° | TILT: +000.0° | ZOOM: 1.0x
       </div>
     </div>
+  <!-- MODAL: Mobile Quick Menu Sheet -->
+  <div class="modal-overlay hidden" id="mobileMenuModal">
+    <div class="modal-dialog modal-small">
+      <div class="modal-header">
+        <h3>⚡ Surveillance Actions & Tools</h3>
+        <button class="btn-close" id="btnCloseMobileMenuModal">&times;</button>
+      </div>
+      <div class="modal-body mobile-menu-list">
+        <button class="mobile-menu-item" id="sheetAddCamera">
+          <span class="icon">➕</span>
+          <div class="item-text">
+            <strong>Add Camera</strong>
+            <span>Register an RTSP or HTTP surveillance stream</span>
+          </div>
+        </button>
+        <button class="mobile-menu-item" id="sheetImportDvr">
+          <span class="icon">📼</span>
+          <div class="item-text">
+            <strong>Import CCTV DVR</strong>
+            <span>Batch import multi-channel analog BNC DVR</span>
+          </div>
+        </button>
+        <button class="mobile-menu-item" id="sheetScanNetwork">
+          <span class="icon">⚡</span>
+          <div class="item-text">
+            <strong>Network Discovery</strong>
+            <span>Scan local subnet for ONVIF &amp; RTSP devices</span>
+          </div>
+        </button>
+        <button class="mobile-menu-item" id="sheetFirmwareHub">
+          <span class="icon"></span>
+          <div class="item-text">
+            <strong>OpenIPC &amp; Firmware Hub</strong>
+            <span>Flash open-source cloudless surveillance OS</span>
+          </div>
+        </button>
+        <button class="mobile-menu-item" id="sheetCamControl">
+          <span class="icon">⚙️</span>
+          <div class="item-text">
+            <strong>Zero-IE Hardware Control</strong>
+            <span>Reboot &amp; control legacy cameras without ActiveX</span>
+          </div>
+        </button>
+        <button class="mobile-menu-item" id="sheetVendorGuide">
+          <span class="icon">📖</span>
+          <div class="item-text">
+            <strong>Vendor Cheatsheet</strong>
+            <span>Hikvision, Dahua, Xiongmai, Tapo, Reolink URLs</span>
+          </div>
+        </button>
+        <button class="mobile-menu-item" id="sheetOpenGallery">
+          <span class="icon">🖼️</span>
+          <div class="item-text">
+            <strong>Captured Snapshots</strong>
+            <span>Browse saved security stills</span>
+          </div>
+        </button>
+      </div>
+    </div>
   </div>
 
-  <script src="./static/js/app.js"></script>
+  <script src="./static/js/app.js?v=2.2.0"></script>
 </body>
 </html>

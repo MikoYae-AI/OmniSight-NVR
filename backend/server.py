@@ -34,6 +34,43 @@ stream_manager = StreamManager(config_manager)
 recorder_manager = RecorderManager(stream_manager)
 
 
+def verify_google_token(token: str, client_id: str = "") -> Optional[Dict[str, Any]]:
+    """Verifies Google ID token via google-auth if installed, or via Google tokeninfo API."""
+    if not token or not isinstance(token, str):
+        return None
+    token = token.strip()
+    # 1. Try google-auth library if installed
+    try:
+        from google.oauth2 import id_token
+        from google.auth.transport import requests
+        req = requests.Request()
+        id_info = id_token.verify_oauth2_token(token, req, client_id or None)
+        return id_info
+    except ImportError:
+        pass
+    except Exception as e:
+        print(f"[GoogleAuth] google-auth verification error: {e}")
+        return None
+
+    # 2. Fallback: Google OAuth2 tokeninfo validation endpoint (standard library)
+    try:
+        import urllib.request
+        import urllib.parse
+        import json
+        url = f"https://oauth2.googleapis.com/tokeninfo?id_token={urllib.parse.quote(token)}"
+        req = urllib.request.Request(url, headers={"User-Agent": "OmniSight-NVR/1.0"})
+        with urllib.request.urlopen(req, timeout=5.0) as resp:
+            if resp.status == 200:
+                info = json.loads(resp.read().decode("utf-8"))
+                if info.get("iss") in ("accounts.google.com", "https://accounts.google.com"):
+                    if client_id and info.get("aud") != client_id:
+                        return None
+                    return info
+    except Exception as e:
+        print(f"[GoogleAuth] tokeninfo verification error: {e}")
+    return None
+
+
 class OmniSightHandler(BaseHTTPRequestHandler):
     """Handles REST API calls, live video streams, and static dashboard assets."""
 
@@ -148,7 +185,8 @@ class OmniSightHandler(BaseHTTPRequestHandler):
                 "ffmpeg_path": ffmpeg_path,
                 "active_camera_count": len(config_manager.get_all_cameras()),
                 "total_snapshots": len(recorder_manager.list_snapshots()),
-                "auth_required": True
+                "auth_required": True,
+                "google_client_id": config_manager.get_google_client_id()
             })
             return
 
@@ -271,6 +309,34 @@ class OmniSightHandler(BaseHTTPRequestHandler):
                 self.send_json({"error": "Invalid username or password"}, 401)
             return
 
+        # Auth API: Google Sign-In
+        if path == "/api/auth/google":
+            credential = body_data.get("credential", "")
+            if not credential:
+                self.send_json({"error": "Google ID token credential is required"}, 400)
+                return
+            client_id = config_manager.get_google_client_id() or body_data.get("client_id", "")
+            id_info = verify_google_token(credential, client_id)
+            if not id_info:
+                self.send_json({"error": "Invalid or expired Google token"}, 401)
+                return
+
+            email = id_info.get("email", "")
+            name = id_info.get("name", email.split("@")[0] if email else "Google User")
+            picture = id_info.get("picture", "")
+
+            session_info = config_manager.authenticate_google_user(email=email, name=name, picture=picture)
+            self.send_json({
+                "status": "ok",
+                "token": session_info["token"],
+                "username": session_info["username"],
+                "email": session_info.get("email"),
+                "name": session_info.get("name"),
+                "picture": session_info.get("picture"),
+                "expires_at": session_info["expires_at"]
+            })
+            return
+
         # Auth API: Logout
         if path == "/api/auth/logout":
             token = self.extract_token()
@@ -283,6 +349,13 @@ class OmniSightHandler(BaseHTTPRequestHandler):
         session = self.get_authenticated_user()
         if not session:
             self.send_json({"error": "Unauthorized", "auth_required": True}, 401)
+            return
+
+        # Auth API: Configure Google OAuth Client ID
+        if path == "/api/auth/google-config":
+            new_client_id = body_data.get("client_id", "")
+            config_manager.set_google_client_id(new_client_id)
+            self.send_json({"status": "ok", "google_client_id": config_manager.get_google_client_id()})
             return
 
         # Auth API: Change Password
@@ -508,7 +581,9 @@ class OmniSightHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", mime)
             self.send_header("Content-Length", str(len(content)))
-            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Expires", "0")
             self.end_headers()
             self.wfile.write(content)
         except Exception as e:
