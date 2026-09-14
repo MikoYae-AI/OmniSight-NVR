@@ -1,7 +1,7 @@
 """
 OmniSight-NVR - High-Performance Surveillance Web Server
 Multithreaded REST API, live multipart/x-mixed-replace MJPEG stream broadcaster,
-and static asset server with zero external dependencies.
+and static asset server with zero external dependencies and session authentication.
 """
 
 import os
@@ -11,7 +11,7 @@ import time
 import shutil
 import urllib.parse
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 try:
     from .config_manager import ConfigManager
@@ -52,7 +52,7 @@ class OmniSightHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.end_headers()
         self.wfile.write(body)
 
@@ -60,15 +60,40 @@ class OmniSightHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, HEAD")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.end_headers()
 
     def do_HEAD(self):
         self.send_response(200)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, HEAD")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.end_headers()
+
+    def extract_token(self, query: Optional[Dict[str, list]] = None) -> Optional[str]:
+        # 1. Check Authorization header
+        auth_header = self.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            return auth_header[7:].strip()
+
+        # 2. Check query params (useful for <img> tags and media streams)
+        if query and "token" in query and query["token"]:
+            return query["token"][0]
+
+        # 3. Check Cookie header
+        cookie_header = self.headers.get("Cookie")
+        if cookie_header:
+            cookies = dict(item.strip().split("=", 1) for item in cookie_header.split(";") if "=" in item)
+            if "omnisight_token" in cookies:
+                return cookies["omnisight_token"]
+
+        return None
+
+    def get_authenticated_user(self, query: Optional[Dict[str, list]] = None) -> Optional[Dict[str, Any]]:
+        token = self.extract_token(query)
+        if not token:
+            return None
+        return config_manager.validate_session(token)
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
@@ -111,7 +136,7 @@ class OmniSightHandler(BaseHTTPRequestHandler):
             self.serve_file(file_path, mime)
             return
 
-        # API: Status
+        # Public API: Status
         if path == "/api/status":
             ffmpeg_path = shutil.which("ffmpeg")
             self.send_json({
@@ -122,9 +147,30 @@ class OmniSightHandler(BaseHTTPRequestHandler):
                 "ffmpeg_available": bool(ffmpeg_path),
                 "ffmpeg_path": ffmpeg_path,
                 "active_camera_count": len(config_manager.get_all_cameras()),
-                "total_snapshots": len(recorder_manager.list_snapshots())
+                "total_snapshots": len(recorder_manager.list_snapshots()),
+                "auth_required": True
             })
             return
+
+        # Public API: Current session info
+        if path == "/api/auth/me":
+            session = self.get_authenticated_user(query)
+            if not session:
+                self.send_json({"authenticated": False}, 200)
+            else:
+                self.send_json({
+                    "authenticated": True,
+                    "username": session["username"],
+                    "expires_at": session["expires_at"]
+                })
+            return
+
+        # Protect all remaining /api/* endpoints
+        if path.startswith("/api/"):
+            session = self.get_authenticated_user(query)
+            if not session:
+                self.send_json({"error": "Unauthorized", "auth_required": True}, 401)
+                return
 
         # API: Get all cameras
         if path == "/api/cameras":
@@ -208,6 +254,50 @@ class OmniSightHandler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         body_data = self.read_json_body()
+
+        # Auth API: Login
+        if path == "/api/auth/login":
+            username = body_data.get("username", "")
+            password = body_data.get("password", "")
+            session_info = config_manager.authenticate_user(username, password)
+            if session_info:
+                self.send_json({
+                    "status": "ok",
+                    "token": session_info["token"],
+                    "username": session_info["username"],
+                    "expires_at": session_info["expires_at"]
+                })
+            else:
+                self.send_json({"error": "Invalid username or password"}, 401)
+            return
+
+        # Auth API: Logout
+        if path == "/api/auth/logout":
+            token = self.extract_token()
+            if token:
+                config_manager.logout_session(token)
+            self.send_json({"status": "logged_out"})
+            return
+
+        # Protect all remaining POST /api/* endpoints
+        session = self.get_authenticated_user()
+        if not session:
+            self.send_json({"error": "Unauthorized", "auth_required": True}, 401)
+            return
+
+        # Auth API: Change Password
+        if path == "/api/auth/change-password":
+            old_pass = body_data.get("old_password", "")
+            new_pass = body_data.get("new_password", "")
+            if not old_pass or not new_pass:
+                self.send_json({"error": "old_password and new_password are required"}, 400)
+                return
+            success = config_manager.change_password(session["username"], old_pass, new_pass)
+            if success:
+                self.send_json({"status": "ok", "message": "Password updated successfully"})
+            else:
+                self.send_json({"error": "Invalid current password"}, 400)
+            return
 
         # API: Add camera
         if path == "/api/cameras":
@@ -350,6 +440,12 @@ class OmniSightHandler(BaseHTTPRequestHandler):
         path = parsed.path
         body_data = self.read_json_body()
 
+        # Protect all PUT /api/* endpoints
+        session = self.get_authenticated_user()
+        if not session:
+            self.send_json({"error": "Unauthorized", "auth_required": True}, 401)
+            return
+
         if path.startswith("/api/cameras/"):
             cam_id = path.split("/")[3]
             updated = config_manager.update_camera(cam_id, body_data)
@@ -365,6 +461,12 @@ class OmniSightHandler(BaseHTTPRequestHandler):
     def do_DELETE(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
+
+        # Protect all DELETE /api/* endpoints
+        session = self.get_authenticated_user()
+        if not session:
+            self.send_json({"error": "Unauthorized", "auth_required": True}, 401)
+            return
 
         if path.startswith("/api/cameras/"):
             cam_id = path.split("/")[3]
