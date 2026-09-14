@@ -85,8 +85,84 @@ class CameraStreamSession:
         """Dispatches either real RTSP/HTTP or the procedural simulation engine."""
         if not self.is_simulated and FFMPEG_BIN and self.stream_url.startswith("rtsp://"):
             self._ffmpeg_rtsp_loop()
+        elif not self.is_simulated and (self.camera_info.get("snapshot_url") or self.camera_info.get("legacy_polling") or self.camera_info.get("ip")):
+            self._http_snapshot_polling_loop()
         else:
             self._simulation_loop()
+
+    def _http_snapshot_polling_loop(self):
+        """Polls camera HTTP snapshot endpoint with Digest/Basic auth support."""
+        ip = self.camera_info.get("ip", "")
+        username = self.camera_info.get("username", "admin")
+        password = self.camera_info.get("password", "")
+        snapshot_url = self.camera_info.get("snapshot_url")
+        if not snapshot_url and ip:
+            vendor = self.camera_info.get("vendor", "hikvision")
+            if vendor in ("hikvision", "hikvision_dvr"):
+                snapshot_url = f"http://{ip}/ISAPI/Streaming/channels/101/picture"
+            elif vendor == "dahua":
+                snapshot_url = f"http://{ip}/cgi-bin/snapshot.cgi?channel=1"
+            else:
+                snapshot_url = f"http://{ip}/snapshot.jpg"
+
+        if not snapshot_url:
+            self._simulation_loop()
+            return
+
+        import urllib.request
+        password_mgr = urllib.request.HTTPPasswordMgrWithDefaultRealm()
+        if username and password:
+            password_mgr.add_password(None, snapshot_url, username, password)
+            password_mgr.add_password(None, f"http://{ip}/", username, password)
+
+        auth_handler = urllib.request.HTTPDigestAuthHandler(password_mgr)
+        basic_handler = urllib.request.HTTPBasicAuthHandler(password_mgr)
+        opener = urllib.request.build_opener(auth_handler, basic_handler)
+
+        target_fps = max(2, min(15, self.camera_info.get("fps", 10)))
+        interval = 1.0 / target_fps
+        consecutive_fails = 0
+
+        while self._running:
+            t0 = time.time()
+            try:
+                req = urllib.request.Request(f"{snapshot_url}?t={int(t0 * 1000)}", headers={"User-Agent": "OmniSight/1.0"})
+                with opener.open(req, timeout=2.0) as resp:
+                    jpeg_bytes = resp.read()
+                    if jpeg_bytes and len(jpeg_bytes) > 500:
+                        with self._lock:
+                            self._latest_jpeg = jpeg_bytes
+                            self._last_frame_time = time.time()
+                        consecutive_fails = 0
+            except Exception as e:
+                consecutive_fails += 1
+                if consecutive_fails >= 3:
+                    # Draw a informative status frame
+                    err_text = f"HIKVISION DS-2CD @ {ip}\nAWAITING PASSWORD IN SETTINGS" if not password else f"CONNECTING TO {ip}...\nCHECK PASSWORD / NETWORK"
+                    with self._lock:
+                        self._latest_jpeg = self._draw_connecting_frame(err_text)
+                    time.sleep(1.0)
+
+            elapsed = time.time() - t0
+            sleep_time = max(0.05, interval - elapsed)
+            time.sleep(sleep_time)
+
+    def _draw_connecting_frame(self, message: str) -> bytes:
+        width = 854
+        height = 480
+        img = Image.new("RGB", (width, height), color=(18, 18, 20))
+        draw = ImageDraw.Draw(img)
+        # Center status message
+        lines = message.split("\n")
+        y = height // 2 - (len(lines) * 12)
+        for line in lines:
+            draw.text((width // 2 - len(line) * 4, y), line, fill=(255, 159, 10))
+            y += 24
+        draw.text((20, 20), self.camera_info.get("name", "Camera").upper(), fill=(255, 255, 255))
+        draw.text((20, height - 30), "OMNISIGHT // STANDALONE PROXY", fill=(100, 110, 130))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=75)
+        return buf.getvalue()
 
     def _simulation_loop(self):
         """Generates procedural surveillance frames with vendor-authentic OSDs."""

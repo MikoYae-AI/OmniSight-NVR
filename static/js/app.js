@@ -456,7 +456,7 @@ function setupCameraPlayer(cam) {
   const container = document.getElementById(`videoContainer-${cam.id}`);
   if (!container) return;
 
-  if (localApiAvailable && !cam.legacy_polling) {
+  if (localApiAvailable) {
     // Connected to Python server: use native multipart MJPEG
     const img = document.createElement("img");
     img.className = "video-feed";
@@ -599,7 +599,7 @@ function startCanvasSimulation(canvas, cam) {
   pollingIntervals[`canvas-${cam.id}`] = animTimer;
 }
 
-// Fallback visual message
+// Fallback visual message for GitHub Pages Mixed Content
 function drawTacticalFallback(container, cam, message) {
   let fb = container.querySelector(".fallback-banner");
   if (!fb) {
@@ -611,14 +611,23 @@ function drawTacticalFallback(container, cam, message) {
     fb.style.flexDirection = "column";
     fb.style.alignItems = "center";
     fb.style.justifyContent = "center";
-    fb.style.background = "rgba(10, 12, 18, 0.95)";
-    fb.style.padding = "15px";
+    fb.style.background = "rgba(18, 18, 20, 0.95)";
+    fb.style.backdropFilter = "blur(14px)";
+    fb.style.padding = "20px";
     fb.style.textAlign = "center";
     fb.innerHTML = `
-      <span style="color: var(--accent-amber); font-weight: bold; font-size: 11px;">⚠️ ${message}</span>
-      <p style="font-size: 10px; color: var(--text-muted); margin: 6px 0;">
-        Browser blocked direct HTTP to ${cam.ip}. Run local hub with <code>./start.sh</code> or allow Insecure Content in site settings.
+      <span style="color: var(--apple-amber); font-weight: 600; font-size: 13px; margin-bottom: 6px;">
+        ⚠️ Browser Blocked Direct HTTP (${cam.ip})
+      </span>
+      <p style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px; line-height: 1.4; max-width: 320px;">
+        Because you are on HTTPS (GitHub Pages), the browser blocks direct requests to local LAN devices.
       </p>
+      <a href="http://localhost:8080" target="_blank" class="btn-action btn-primary" style="font-size: 11px; text-decoration: none; padding: 7px 16px;">
+        Open on Local Hub (http://localhost:8080)
+      </a>
+      <span style="font-size: 10px; color: var(--text-tertiary); margin-top: 10px;">
+        Or click the browser padlock icon &gt; Site settings &gt; Set 'Insecure content' to Allow.
+      </span>
     `;
     container.appendChild(fb);
   }
