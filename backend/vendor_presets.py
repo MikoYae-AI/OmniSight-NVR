@@ -200,6 +200,24 @@ VENDOR_PRESETS: Dict[str, Dict[str, Any]] = {
         ],
         "default_channel": 0
     },
+    "v360": {
+        "id": "v360",
+        "name": "V360 Pro / 360 Smart Camera (Qihoo)",
+        "brand": "V360",
+        "default_ports": {"rtsp": 554, "http": 80, "onvif": 8899},
+        "default_credentials": {"username": "admin", "password": ""},
+        "rtsp_patterns": {
+            "main": "rtsp://{username}:{password}@{ip}:{port}/live/ch0",
+            "sub": "rtsp://{username}:{password}@{ip}:{port}/live/ch1",
+        },
+        "snapshot_url": "http://{username}:{password}@{ip}:{port}/snapshot.jpg",
+        "ptz_supported": True,
+        "quirks": [
+            "V360 Pro panoramic & PTZ camera OEM.",
+            "Supports 360-degree rotation, dual-light night vision, humanoid alarm siren, and hold-to-talk audio."
+        ],
+        "default_channel": 0
+    },
     "uniview": {
         "id": "uniview",
         "name": "Uniview (UNV)",

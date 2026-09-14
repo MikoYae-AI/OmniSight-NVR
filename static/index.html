@@ -208,14 +208,19 @@
 
         <div class="auth-alert hidden" id="googleAlert"></div>
 
-        <!-- Firebase Google Popup Button -->
-        <button type="button" class="btn-action btn-secondary" id="btnFirebaseGoogleLogin" style="width: 100%; justify-content: center; gap: 8px; margin-bottom: 12px; background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2);">
+        <!-- Google OAuth 2.0 & Firebase Buttons -->
+        <a href="/api/auth/google/login" class="btn-action btn-secondary" id="btnGoogleOAuthDirect" style="width: 100%; justify-content: center; gap: 8px; margin-bottom: 8px; text-decoration: none; background: rgba(66, 133, 244, 0.15); border-color: rgba(66, 133, 244, 0.4); color: #fff;">
           <svg width="18" height="18" viewBox="0 0 48 48">
             <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
             <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
             <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
             <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
           </svg>
+          <span style="font-weight: 500;">Authorize via Google OAuth 2.0</span>
+        </a>
+
+        <button type="button" class="btn-action btn-secondary" id="btnFirebaseGoogleLogin" style="width: 100%; justify-content: center; gap: 8px; margin-bottom: 12px; background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2);">
+          <span style="font-size: 16px;">🔥</span>
           <span style="font-weight: 500;">Instant Firebase Google Sign-In</span>
         </button>
 
@@ -759,30 +764,100 @@
     </div>
   </div>
 
-  <!-- PTZ Floating Controller Template -->
-  <div class="ptz-overlay-panel hidden" id="ptzPanel">
-    <div class="ptz-header">
-      <span id="ptzCamTitle">PTZ Controller</span>
-      <button class="btn-close-sm" id="btnClosePtz">&times;</button>
-    </div>
-    <div class="ptz-body">
-      <div class="ptz-pad">
-        <button class="ptz-btn ptz-up" data-ptz="up">▲</button>
-        <div class="ptz-mid">
-          <button class="ptz-btn ptz-left" data-ptz="left">◀</button>
-          <button class="ptz-btn ptz-center" data-ptz="home">●</button>
-          <button class="ptz-btn ptz-right" data-ptz="right">▶</button>
+  <!-- V380 Pro / V360 Pro Mobile PTZ Command Deck -->
+  <div class="ptz-overlay-panel hidden" id="ptzPanel" style="max-width: 380px; width: 92%; border-radius: 16px; box-shadow: 0 16px 40px rgba(0,0,0,0.6); background: rgba(18, 18, 22, 0.95); backdrop-filter: blur(20px); border: 1px solid rgba(255, 255, 255, 0.1);">
+    <div class="ptz-header" style="border-bottom: 1px solid rgba(255,255,255,0.08); padding: 12px 16px; display: flex; justify-content: space-between; align-items: center;">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span style="font-size: 16px;">🎮</span>
+        <div>
+          <strong id="ptzCamTitle" style="font-size: 13px; color: var(--text-primary); display: block;">V380 / V360 Pro Deck</strong>
+          <span style="font-size: 10px; color: var(--accent-green); font-family: monospace;">● LIVE HARDWARE LINK</span>
         </div>
-        <button class="ptz-btn ptz-down" data-ptz="down">▼</button>
       </div>
-      <div class="ptz-zoom">
-        <button class="ptz-btn" data-ptz="zoom_in">+ ZOOM</button>
-        <button class="ptz-btn" data-ptz="zoom_out">- ZOOM</button>
+      <button class="btn-close-sm" id="btnClosePtz" style="background: rgba(255,255,255,0.1); border: none; color: #fff; width: 28px; height: 28px; border-radius: 50%; cursor: pointer;">&times;</button>
+    </div>
+    <div class="ptz-body" style="padding: 14px;">
+      <!-- Directional Virtual D-Pad -->
+      <div class="ptz-pad" style="margin: 0 auto 12px auto;">
+        <button class="ptz-btn ptz-up" data-ptz="up" title="Tilt Up">▲</button>
+        <div class="ptz-mid">
+          <button class="ptz-btn ptz-left" data-ptz="left" title="Pan Left">◀</button>
+          <button class="ptz-btn ptz-center" data-ptz="home" title="Center Home">●</button>
+          <button class="ptz-btn ptz-right" data-ptz="right" title="Pan Right">▶</button>
+        </div>
+        <button class="ptz-btn ptz-down" data-ptz="down" title="Tilt Down">▼</button>
       </div>
-      <div class="ptz-telemetry" id="ptzTelemetry">
+
+      <!-- Zoom & Telemetry -->
+      <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+        <button class="ptz-btn" data-ptz="zoom_in" style="flex: 1; padding: 8px; font-size: 11px;">🔍 ZOOM +</button>
+        <button class="ptz-btn" data-ptz="zoom_out" style="flex: 1; padding: 8px; font-size: 11px;">🔎 ZOOM -</button>
+      </div>
+      <div class="ptz-telemetry" id="ptzTelemetry" style="font-size: 10px; text-align: center; color: var(--text-muted); margin-bottom: 12px; font-family: monospace;">
         PAN: +000.0° | TILT: +000.0° | ZOOM: 1.0x
       </div>
+
+      <!-- V380 / V360 Pro Night Vision Modes -->
+      <div style="margin-bottom: 12px; background: rgba(0,0,0,0.3); border-radius: 10px; padding: 8px 10px;">
+        <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase;">
+          <span>💡 Night Vision Light Mode</span>
+          <span id="currentNightVisionText" style="color: var(--apple-blue); font-weight: 600;">AUTO</span>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px;">
+          <button class="btn-nv-mode active" data-nv="auto" style="padding: 4px; font-size: 10px; border-radius: 6px; background: rgba(0,122,255,0.2); border: 1px solid var(--apple-blue); color: #fff;">🌙 Auto</button>
+          <button class="btn-nv-mode" data-nv="color" style="padding: 4px; font-size: 10px; border-radius: 6px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); color: var(--text-secondary);">💡 Color</button>
+          <button class="btn-nv-mode" data-nv="ir" style="padding: 4px; font-size: 10px; border-radius: 6px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); color: var(--text-secondary);">🌑 IR B&W</button>
+          <button class="btn-nv-mode" data-nv="smart" style="padding: 4px; font-size: 10px; border-radius: 6px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); color: var(--text-secondary);">🚨 Smart</button>
+        </div>
+      </div>
+
+      <!-- V380 / V360 Pro Intercom & Siren Action Bar -->
+      <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+        <button id="btnIntercomTalk" style="flex: 2; padding: 10px; font-size: 11px; font-weight: 600; border-radius: 10px; background: rgba(52, 199, 89, 0.15); border: 1px solid rgba(52, 199, 89, 0.3); color: #34c759; display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer;">
+          <span style="font-size: 14px;">🎙️</span> <span id="intercomLabel">Hold to Talk</span>
+        </button>
+        <button id="btnTriggerSiren" style="flex: 1; padding: 10px; font-size: 11px; font-weight: 600; border-radius: 10px; background: rgba(255, 59, 48, 0.15); border: 1px solid rgba(255, 59, 48, 0.3); color: #ff3b30; display: flex; align-items: center; justify-content: center; gap: 4px; cursor: pointer;">
+          <span>🚨</span> Siren
+        </button>
+      </div>
+
+      <!-- V380 / V360 Pro Location Memory Presets -->
+      <div style="margin-bottom: 12px;">
+        <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase;">
+          <span>⭐ Angle Memory Presets</span>
+          <span style="font-size: 9px; color: var(--text-muted);">(Long-press to save)</span>
+        </div>
+        <div style="display: flex; gap: 6px;">
+          <button class="btn-ptz-preset" data-preset="1" style="flex: 1; padding: 6px; font-size: 11px; border-radius: 8px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); color: #fff;">1: Door</button>
+          <button class="btn-ptz-preset" data-preset="2" style="flex: 1; padding: 6px; font-size: 11px; border-radius: 8px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); color: #fff;">2: Gate</button>
+          <button class="btn-ptz-preset" data-preset="3" style="flex: 1; padding: 6px; font-size: 11px; border-radius: 8px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); color: #fff;">3: Yard</button>
+        </div>
+      </div>
+
+      <!-- V380 / V360 Pro 24-Hour Interactive Playback Scrubber -->
+      <div style="background: rgba(0,0,0,0.4); border-radius: 10px; padding: 8px 10px;">
+        <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); margin-bottom: 4px;">
+          <span>⏱️ Timeline Playback</span>
+          <span id="timelineCurrentTime" style="color: var(--accent-green); font-family: monospace;">12:30:00</span>
+        </div>
+        <div id="v380TimelineTrack" style="position: relative; height: 18px; background: rgba(255,255,255,0.08); border-radius: 4px; overflow: hidden; cursor: pointer;">
+          <!-- Event markers -->
+          <div style="position: absolute; left: 15%; width: 10%; height: 100%; background: rgba(255, 149, 0, 0.4);" title="Motion Event"></div>
+          <div style="position: absolute; left: 45%; width: 15%; height: 100%; background: rgba(52, 199, 89, 0.4);" title="Continuous Record"></div>
+          <div style="position: absolute; left: 75%; width: 8%; height: 100%; background: rgba(255, 59, 48, 0.5);" title="Humanoid Alarm"></div>
+          <!-- Scrubber Needle -->
+          <div id="timelineNeedle" style="position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; background: #ff3b30; box-shadow: 0 0 6px #ff3b30;"></div>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 9px; color: var(--text-muted); margin-top: 3px; font-family: monospace;">
+          <span>00:00</span>
+          <span>06:00</span>
+          <span>12:00</span>
+          <span>18:00</span>
+          <span>24:00</span>
+        </div>
+      </div>
     </div>
+  </div>
   <!-- MODAL: Mobile Quick Menu Sheet -->
   <div class="modal-overlay hidden" id="mobileMenuModal">
     <div class="modal-dialog modal-small">

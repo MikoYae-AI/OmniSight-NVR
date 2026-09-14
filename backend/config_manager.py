@@ -229,6 +229,15 @@ class ConfigManager:
             self.data["google_client_id"] = client_id.strip()
             self._save()
 
+    def get_google_client_secret(self) -> str:
+        with self._lock:
+            return self.data.get("google_client_secret") or os.environ.get("GOOGLE_CLIENT_SECRET", "")
+
+    def set_google_client_secret(self, client_secret: str):
+        with self._lock:
+            self.data["google_client_secret"] = client_secret.strip()
+            self._save()
+
     def authenticate_google_user(self, email: str, name: str = "", picture: str = "") -> Dict[str, Any]:
         with self._lock:
             users = self.data.setdefault("users", [])

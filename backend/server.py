@@ -10,6 +10,7 @@ import json
 import time
 import shutil
 import urllib.parse
+import urllib.request
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from typing import Dict, Any, Optional
 
@@ -57,9 +58,6 @@ def verify_google_token(token: str, client_id: str = "") -> Optional[Dict[str, A
 
     # 2. Fallback: Google OAuth2 tokeninfo validation endpoint (standard library)
     try:
-        import urllib.request
-        import urllib.parse
-        import json
         url = f"https://oauth2.googleapis.com/tokeninfo?id_token={urllib.parse.quote(token)}"
         req = urllib.request.Request(url, headers={"User-Agent": "OmniSight-NVR/1.0"})
         with urllib.request.urlopen(req, timeout=5.0) as resp:
@@ -209,6 +207,109 @@ class OmniSightHandler(BaseHTTPRequestHandler):
                     "username": session["username"],
                     "expires_at": session["expires_at"]
                 })
+            return
+
+        # Public API: Google OAuth 2.0 Configuration & Authorization URL
+        if path == "/api/auth/google/oauth-url":
+            client_id = config_manager.get_google_client_id()
+            host = self.headers.get("Host", f"localhost:{cloud_relay_manager.port}")
+            proto = "https" if "trycloudflare" in host or "https" in self.headers.get("X-Forwarded-Proto", "") else "http"
+            redirect_uri = f"{proto}://{host}/api/auth/google/callback"
+            oauth_url = (
+                f"https://accounts.google.com/o/oauth2/v2/auth?"
+                f"client_id={urllib.parse.quote(client_id)}&"
+                f"redirect_uri={urllib.parse.quote(redirect_uri)}&"
+                f"response_type=code&scope=openid%20email%20profile&access_type=offline&prompt=select_account"
+            ) if client_id else ""
+            self.send_json({
+                "oauth_configured": bool(client_id),
+                "client_id": client_id,
+                "redirect_uri": redirect_uri,
+                "oauth_url": oauth_url
+            })
+            return
+
+        # Public API: Google OAuth 2.0 Login Redirect
+        if path == "/api/auth/google/login":
+            client_id = config_manager.get_google_client_id()
+            if not client_id:
+                self.send_response(302)
+                self.send_header("Location", "/?error=google_oauth_not_configured")
+                self.end_headers()
+                return
+            host = self.headers.get("Host", f"localhost:{cloud_relay_manager.port}")
+            proto = "https" if "trycloudflare" in host or "https" in self.headers.get("X-Forwarded-Proto", "") else "http"
+            redirect_uri = f"{proto}://{host}/api/auth/google/callback"
+            oauth_url = (
+                f"https://accounts.google.com/o/oauth2/v2/auth?"
+                f"client_id={urllib.parse.quote(client_id)}&"
+                f"redirect_uri={urllib.parse.quote(redirect_uri)}&"
+                f"response_type=code&scope=openid%20email%20profile&access_type=offline&prompt=select_account"
+            )
+            self.send_response(302)
+            self.send_header("Location", oauth_url)
+            self.end_headers()
+            return
+
+        # Public API: Google OAuth 2.0 Callback
+        if path == "/api/auth/google/callback":
+            code = query.get("code", [None])[0]
+            if not code:
+                err = query.get("error", ["no_code_received"])[0]
+                self.send_response(302)
+                self.send_header("Location", f"/?error={urllib.parse.quote(err)}")
+                self.end_headers()
+                return
+
+            client_id = config_manager.get_google_client_id()
+            client_secret = config_manager.get_google_client_secret()
+            host = self.headers.get("Host", f"localhost:{cloud_relay_manager.port}")
+            proto = "https" if "trycloudflare" in host or "https" in self.headers.get("X-Forwarded-Proto", "") else "http"
+            redirect_uri = f"{proto}://{host}/api/auth/google/callback"
+
+            token_url = "https://oauth2.googleapis.com/token"
+            data = urllib.parse.urlencode({
+                "code": code,
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "redirect_uri": redirect_uri,
+                "grant_type": "authorization_code"
+            }).encode("utf-8")
+
+            try:
+                req = urllib.request.Request(token_url, data=data, headers={"Content-Type": "application/x-www-form-urlencoded"})
+                with urllib.request.urlopen(req, timeout=8.0) as resp:
+                    resp_data = json.loads(resp.read().decode("utf-8"))
+                    id_token_jwt = resp_data.get("id_token")
+                    access_token = resp_data.get("access_token")
+
+                    info = verify_google_token(id_token_jwt, client_id) if id_token_jwt else None
+                    email = info.get("email") if info else None
+                    name = info.get("name") if info else "Google User"
+                    picture = info.get("picture", "") if info else ""
+
+                    if not email and access_token:
+                        u_req = urllib.request.Request("https://www.googleapis.com/oauth2/v2/userinfo", headers={"Authorization": f"Bearer {access_token}"})
+                        with urllib.request.urlopen(u_req, timeout=5.0) as uresp:
+                            uinfo = json.loads(uresp.read().decode("utf-8"))
+                            email = uinfo.get("email")
+                            name = uinfo.get("name", "Google User")
+                            picture = uinfo.get("picture", "")
+
+                    if email:
+                        session_info = config_manager.authenticate_google_user(email=email, name=name, picture=picture)
+                        token = session_info["token"]
+                        self.send_response(302)
+                        self.send_header("Set-Cookie", f"omnisight_token={token}; Path=/; HttpOnly; SameSite=Lax")
+                        self.send_header("Location", f"/?token={token}&auth=success")
+                        self.end_headers()
+                        return
+            except Exception as e:
+                print(f"[GoogleOAuth] Exchange error: {e}")
+
+            self.send_response(302)
+            self.send_header("Location", "/?error=oauth_exchange_failed")
+            self.end_headers()
             return
 
         # Protect all remaining /api/* endpoints
@@ -500,7 +601,45 @@ class OmniSightHandler(BaseHTTPRequestHandler):
                 "action": action,
                 "pan": session.pan,
                 "tilt": session.tilt,
-                "zoom": session.zoom
+                "zoom": session.zoom,
+                "night_vision": getattr(session, "night_vision", "auto"),
+                "siren_active": getattr(session, "siren_active", False),
+                "intercom_active": getattr(session, "intercom_active", False),
+                "presets": getattr(session, "presets", {})
+            })
+            return
+
+        # API: V380 Pro / V360 Pro Smart Controls (Night Vision, Siren, Intercom, Presets)
+        if path.startswith("/api/cameras/") and path.endswith("/control"):
+            cam_id = path.split("/")[3]
+            session = stream_manager.get_session(cam_id)
+            if not session:
+                self.send_json({"error": "Camera not found"}, 404)
+                return
+            ctrl_type = body_data.get("type", "")
+            val = body_data.get("value", "")
+
+            if ctrl_type == "night_vision":
+                session.set_night_vision(str(val))
+            elif ctrl_type == "siren":
+                session.trigger_siren(duration=float(body_data.get("duration", 3.0)))
+            elif ctrl_type == "intercom":
+                session.set_intercom(bool(val))
+            elif ctrl_type == "save_preset":
+                session.save_preset(int(val))
+            elif ctrl_type == "goto_preset":
+                session.goto_preset(int(val))
+
+            self.send_json({
+                "status": "ok",
+                "camera_id": cam_id,
+                "night_vision": session.night_vision,
+                "siren_active": session.siren_active,
+                "intercom_active": session.intercom_active,
+                "pan": session.pan,
+                "tilt": session.tilt,
+                "zoom": session.zoom,
+                "presets": session.presets
             })
             return
 

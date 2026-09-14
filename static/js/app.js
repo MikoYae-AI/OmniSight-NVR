@@ -311,6 +311,18 @@ const camVendor = document.getElementById("camVendor");
 const quirkText = document.getElementById("quirkText");
 
 document.addEventListener("DOMContentLoaded", async () => {
+  // Check for Google OAuth 2.0 redirect token
+  const urlParams = new URLSearchParams(window.location.search);
+  const oauthToken = urlParams.get("token");
+  if (oauthToken) {
+    authToken = oauthToken;
+    sessionStorage.setItem("omnisight_token", authToken);
+    localStorage.setItem("omnisight_token", authToken);
+    sessionStorage.setItem("omnisight_unlocked", "true");
+    window.history.replaceState({}, document.title, window.location.pathname);
+    showNotification("Authenticated via Google OAuth 2.0!", "success");
+  }
+
   initClock();
   initFirebaseAuth();
   await detectBackend();
@@ -1224,6 +1236,152 @@ document.getElementById("btnClosePtz").onclick = () => {
   ptzPanel.classList.add("hidden");
   activePtzCamId = null;
 };
+
+// V380 Pro / V360 Pro Smart Controls
+document.querySelectorAll(".btn-nv-mode").forEach(btn => {
+  btn.addEventListener("click", async () => {
+    if (!activePtzCamId) return;
+    const mode = btn.dataset.nv;
+    document.querySelectorAll(".btn-nv-mode").forEach(b => {
+      b.classList.remove("active");
+      b.style.background = "rgba(255,255,255,0.06)";
+      b.style.borderColor = "rgba(255,255,255,0.1)";
+      b.style.color = "var(--text-secondary)";
+    });
+    btn.classList.add("active");
+    btn.style.background = "rgba(0,122,255,0.2)";
+    btn.style.borderColor = "var(--apple-blue)";
+    btn.style.color = "#fff";
+
+    const label = document.getElementById("currentNightVisionText");
+    if (label) label.textContent = mode.toUpperCase();
+
+    if (localApiAvailable) {
+      try {
+        await authFetch(`/api/cameras/${activePtzCamId}/control`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "night_vision", value: mode })
+        });
+        showNotification(`Night Vision set to ${mode.toUpperCase()} (V380/V360)`, "success");
+      } catch (e) {}
+    } else {
+      showNotification(`Night Vision set to ${mode.toUpperCase()}`, "success");
+    }
+  });
+});
+
+// V380 Pro Siren Trigger
+const btnTriggerSiren = document.getElementById("btnTriggerSiren");
+if (btnTriggerSiren) {
+  btnTriggerSiren.addEventListener("click", async () => {
+    if (!activePtzCamId) return;
+    btnTriggerSiren.style.background = "#ff3b30";
+    btnTriggerSiren.style.color = "#fff";
+    showNotification("🚨 V380/V360 Alarm Siren Sounded!", "warning");
+
+    if (localApiAvailable) {
+      try {
+        await authFetch(`/api/cameras/${activePtzCamId}/control`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "siren", duration: 3.0 })
+        });
+      } catch (e) {}
+    }
+    setTimeout(() => {
+      btnTriggerSiren.style.background = "rgba(255, 59, 48, 0.15)";
+      btnTriggerSiren.style.color = "#ff3b30";
+    }, 2500);
+  });
+}
+
+// V380 Pro Intercom Hold to Talk
+const btnIntercomTalk = document.getElementById("btnIntercomTalk");
+const intercomLabel = document.getElementById("intercomLabel");
+if (btnIntercomTalk) {
+  const startTalk = async () => {
+    if (!activePtzCamId) return;
+    btnIntercomTalk.style.background = "rgba(52, 199, 89, 0.4)";
+    if (intercomLabel) intercomLabel.textContent = "Broadcasting Audio...";
+    if (localApiAvailable) {
+      try {
+        await authFetch(`/api/cameras/${activePtzCamId}/control`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "intercom", value: true })
+        });
+      } catch (e) {}
+    }
+  };
+
+  const stopTalk = async () => {
+    if (!activePtzCamId) return;
+    btnIntercomTalk.style.background = "rgba(52, 199, 89, 0.15)";
+    if (intercomLabel) intercomLabel.textContent = "Hold to Talk";
+    if (localApiAvailable) {
+      try {
+        await authFetch(`/api/cameras/${activePtzCamId}/control`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "intercom", value: false })
+        });
+      } catch (e) {}
+    }
+  };
+
+  btnIntercomTalk.addEventListener("mousedown", startTalk);
+  btnIntercomTalk.addEventListener("mouseup", stopTalk);
+  btnIntercomTalk.addEventListener("touchstart", (e) => { e.preventDefault(); startTalk(); });
+  btnIntercomTalk.addEventListener("touchend", (e) => { e.preventDefault(); stopTalk(); });
+}
+
+// V380 Pro Preset Angle Memory
+document.querySelectorAll(".btn-ptz-preset").forEach(btn => {
+  btn.addEventListener("click", async () => {
+    if (!activePtzCamId) return;
+    const presetNum = parseInt(btn.dataset.preset);
+    if (localApiAvailable) {
+      try {
+        const res = await authFetch(`/api/cameras/${activePtzCamId}/control`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "goto_preset", value: presetNum })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          document.getElementById("ptzTelemetry").textContent =
+            `PAN: ${data.pan >= 0 ? '+' : ''}${data.pan.toFixed(1)}° | TILT: ${data.tilt >= 0 ? '+' : ''}${data.tilt.toFixed(1)}° | ZOOM: ${data.zoom.toFixed(1)}x`;
+          showNotification(`Moved to Preset ${presetNum} (V380/V360)`, "success");
+        }
+      } catch (e) {}
+    } else {
+      showNotification(`Moved to Preset ${presetNum}`, "success");
+    }
+  });
+});
+
+// V380 Pro 24-Hour Timeline Scrubber
+const v380TimelineTrack = document.getElementById("v380TimelineTrack");
+const timelineNeedle = document.getElementById("timelineNeedle");
+const timelineCurrentTime = document.getElementById("timelineCurrentTime");
+if (v380TimelineTrack && timelineNeedle) {
+  v380TimelineTrack.addEventListener("click", (e) => {
+    const rect = v380TimelineTrack.getBoundingClientRect();
+    const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+    const pct = x / rect.width;
+    timelineNeedle.style.left = `${(pct * 100).toFixed(1)}%`;
+
+    const totalMinutes = Math.floor(pct * 24 * 60);
+    const hours = Math.floor(totalMinutes / 60);
+    const mins = totalMinutes % 60;
+    const timeStr = `${String(hours).padStart(2, "0")}:${String(mins).padStart(2, "0")}:00`;
+    if (timelineCurrentTime) {
+      timelineCurrentTime.textContent = timeStr;
+    }
+    showNotification(`Timeline scrubbed to ${timeStr}`, "info");
+  });
+}
 
 // Modals: Add / Edit Camera
 function openAddCameraModal() {

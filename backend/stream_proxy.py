@@ -44,6 +44,50 @@ class CameraStreamSession:
         self.motion_box = None
         self.motion_timer = 0
 
+        # V380 Pro / V360 Pro Advanced Controls
+        self.night_vision = "auto"  # auto, color, ir, smart
+        self.siren_active = False
+        self.intercom_active = False
+        self.presets = {
+            1: {"pan": 0.0, "tilt": 0.0, "zoom": 1.0},
+            2: {"pan": 45.0, "tilt": 15.0, "zoom": 1.5},
+            3: {"pan": -45.0, "tilt": -10.0, "zoom": 2.0}
+        }
+
+    def set_night_vision(self, mode: str):
+        with self._lock:
+            if mode in ("auto", "color", "ir", "smart"):
+                self.night_vision = mode
+
+    def trigger_siren(self, duration: float = 3.0):
+        with self._lock:
+            self.siren_active = True
+        def _stop():
+            time.sleep(duration)
+            with self._lock:
+                self.siren_active = False
+        threading.Thread(target=_stop, daemon=True).start()
+
+    def set_intercom(self, active: bool):
+        with self._lock:
+            self.intercom_active = bool(active)
+
+    def save_preset(self, num: int):
+        with self._lock:
+            self.presets[int(num)] = {
+                "pan": self.pan,
+                "tilt": self.tilt,
+                "zoom": self.zoom
+            }
+
+    def goto_preset(self, num: int):
+        with self._lock:
+            p = self.presets.get(int(num))
+            if p:
+                self.pan = p["pan"]
+                self.tilt = p["tilt"]
+                self.zoom = p["zoom"]
+
     def adjust_ptz(self, action: str, step: float = 5.0):
         with self._lock:
             if action == "left":
@@ -62,6 +106,22 @@ class CameraStreamSession:
                 self.pan = 0.0
                 self.tilt = 0.0
                 self.zoom = 1.0
+            elif action.startswith("preset_"):
+                try:
+                    num = int(action.split("_")[1])
+                    p = self.presets.get(num)
+                    if p:
+                        self.pan = p["pan"]
+                        self.tilt = p["tilt"]
+                        self.zoom = p["zoom"]
+                except (IndexError, ValueError):
+                    pass
+            elif action.startswith("save_"):
+                try:
+                    num = int(action.split("_")[1])
+                    self.presets[num] = {"pan": self.pan, "tilt": self.tilt, "zoom": self.zoom}
+                except (IndexError, ValueError):
+                    pass
 
     def start(self):
         with self._lock:

@@ -4,6 +4,7 @@ Performs ONVIF WS-Discovery probes and LAN port scanning to locate
 Hikvision, Dahua, Xiongmai, and generic ONVIF/RTSP surveillance devices.
 """
 
+import os
 import socket
 import struct
 import uuid
@@ -41,14 +42,31 @@ def get_local_ip() -> str:
     """Discovers the active primary local IP address."""
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
-        # Does not actually connect externally, merely selects outbound interface
-        s.connect(('10.255.255.255', 1))
+        s.connect(('8.8.8.8', 80))
         local_ip = s.getsockname()[0]
     except Exception:
         local_ip = '127.0.0.1'
     finally:
         s.close()
     return local_ip
+
+
+def get_arp_ips() -> List[str]:
+    """Reads the Linux ARP cache to instantly locate active devices on the local subnet."""
+    ips = []
+    try:
+        if os.path.exists("/proc/net/arp"):
+            with open("/proc/net/arp", "r", encoding="utf-8") as f:
+                lines = f.readlines()
+                for line in lines[1:]:
+                    parts = line.split()
+                    if len(parts) >= 4 and parts[2] != "0x0":
+                        ip = parts[0]
+                        if not ip.startswith("127."):
+                            ips.append(ip)
+    except Exception:
+        pass
+    return ips
 
 
 def run_onvif_discovery(timeout: float = 2.5) -> List[Dict[str, Any]]:
@@ -155,7 +173,11 @@ def scan_lan_subnet(subnet_base: str = "", max_hosts: int = 40) -> List[Dict[str
             subnet_base = "192.168.1"
 
     results = []
-    ips_to_scan = [f"{subnet_base}.{i}" for i in range(1, min(max_hosts + 1, 255))]
+    arp_ips = [ip for ip in get_arp_ips() if ip.startswith(subnet_base)]
+    range_ips = [f"{subnet_base}.{i}" for i in range(1, min(max_hosts + 1, 255))]
+    common_cam_ips = [f"{subnet_base}.{i}" for i in range(100, 130)] + [f"{subnet_base}.{i}" for i in range(200, 215)]
+    # Deduplicate while preserving ARP priority
+    ips_to_scan = list(dict.fromkeys(arp_ips + range_ips + common_cam_ips))
 
     def check_ip(ip):
         ports = scan_host_camera_ports(ip)
