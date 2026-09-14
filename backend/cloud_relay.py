@@ -161,7 +161,7 @@ class CloudRelayManager:
                     # Search for public trycloudflare URL
                     if not self.cloud_url:
                         m = re.search(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com", line)
-                        if m:
+                        if m and m.group(0) != "https://api.trycloudflare.com":
                             self.cloud_url = m.group(0)
                             self.status = "connected"
                             self._generate_qr(self.cloud_url)
