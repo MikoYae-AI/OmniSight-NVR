@@ -17,23 +17,25 @@ let pollingIntervals = {};
 // Fallback Default Cameras (For pure client-side GitHub Pages mode)
 const DEFAULT_CLIENT_CAMERAS = [
   {
-    id: "cam-hikvision-01",
-    name: "Hikvision DS-2CD Front Gate",
+    id: "cam-hikvision-13",
+    name: "Hikvision DS-2CD2420F-IW",
     vendor: "hikvision",
-    group: "Perimeter",
-    ip: "192.168.1.101",
+    group: "Living Area",
+    ip: "192.168.1.13",
     port: 554,
     username: "admin",
     password: "",
-    stream_url: "sim://hikvision_gate",
-    sub_stream_url: "sim://hikvision_gate_sub",
+    stream_url: "rtsp://admin:@192.168.1.13:554/Streaming/Channels/101",
+    sub_stream_url: "rtsp://admin:@192.168.1.13:554/Streaming/Channels/102",
+    snapshot_url: "http://admin:@192.168.1.13/ISAPI/Streaming/channels/101/picture",
     channel: 1,
-    is_simulated: true,
+    is_simulated: false,
+    legacy_polling: true,
     status: "online",
     fps: 25,
     resolution: "1920x1080",
-    ptz: true,
-    notes: "Hikvision 4MP ColorVu Bullet (Direct stream / simulation)."
+    ptz: false,
+    notes: "Hikvision 2MP Cube IP Camera (DS-2CD2420F-IW, R6 Platform)."
   },
   {
     id: "cam-xiongmai-02",
