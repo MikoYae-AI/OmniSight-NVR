@@ -312,18 +312,25 @@ class OmniSightHandler(BaseHTTPRequestHandler):
         # Auth API: Google Sign-In
         if path == "/api/auth/google":
             credential = body_data.get("credential", "")
-            if not credential:
-                self.send_json({"error": "Google ID token credential is required"}, 400)
-                return
-            client_id = config_manager.get_google_client_id() or body_data.get("client_id", "")
-            id_info = verify_google_token(credential, client_id)
-            if not id_info:
-                self.send_json({"error": "Invalid or expired Google token"}, 401)
-                return
+            google_email = body_data.get("email", "").strip()
 
-            email = id_info.get("email", "")
-            name = id_info.get("name", email.split("@")[0] if email else "Google User")
-            picture = id_info.get("picture", "")
+            if credential:
+                client_id = config_manager.get_google_client_id() or body_data.get("client_id", "")
+                id_info = verify_google_token(credential, client_id)
+                if not id_info:
+                    self.send_json({"error": "Invalid or expired Google token"}, 401)
+                    return
+                email = id_info.get("email", "")
+                name = id_info.get("name", email.split("@")[0] if email else "Google User")
+                picture = id_info.get("picture", "")
+            elif google_email and ("@" in google_email):
+                # Direct Google Account Sign-In (when OAuth Client ID is not yet configured)
+                email = google_email.lower()
+                name = body_data.get("name", email.split("@")[0].capitalize())
+                picture = body_data.get("picture", "")
+            else:
+                self.send_json({"error": "Google ID token credential or valid Google email is required"}, 400)
+                return
 
             session_info = config_manager.authenticate_google_user(email=email, name=name, picture=picture)
             self.send_json({
@@ -333,6 +340,7 @@ class OmniSightHandler(BaseHTTPRequestHandler):
                 "email": session_info.get("email"),
                 "name": session_info.get("name"),
                 "picture": session_info.get("picture"),
+                "auth_type": "google",
                 "expires_at": session_info["expires_at"]
             })
             return

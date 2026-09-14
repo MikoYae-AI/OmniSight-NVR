@@ -406,34 +406,26 @@ function renderCustomGoogleButton() {
 
   const btn = document.getElementById("btnCustomGoogleLogin");
   if (btn) {
-    btn.onclick = async () => {
+    btn.onclick = () => {
       if (!googleClientId) {
-        const inputId = prompt(
-          "Google OAuth Client ID is required for Google Sign-In.\nEnter your Google Client ID (e.g. xxxxx.apps.googleusercontent.com):",
-          ""
-        );
-        if (!inputId || !inputId.trim()) return;
-        googleClientId = inputId.trim();
-        localStorage.setItem("omnisight_google_client_id", googleClientId);
-        if (localApiAvailable) {
-          try {
-            await authFetch("/api/auth/google-config", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ client_id: googleClientId })
-            });
-          } catch (e) {}
-        }
-        initGoogleAuth(googleClientId);
-        if (window.google && window.google.accounts && window.google.accounts.id) {
-          google.accounts.id.prompt();
-        }
+        openGoogleSignInModal();
       } else {
         if (window.google && window.google.accounts && window.google.accounts.id) {
           google.accounts.id.prompt();
+        } else {
+          openGoogleSignInModal();
         }
       }
     };
+  }
+}
+
+function openGoogleSignInModal() {
+  const googleModal = document.getElementById("googleModal");
+  if (googleModal) {
+    document.getElementById("googleAlert")?.classList.add("hidden");
+    loginModal.classList.add("hidden");
+    googleModal.classList.remove("hidden");
   }
 }
 
@@ -1389,6 +1381,95 @@ function attachEventListeners() {
       loginAlert.classList.remove("hidden");
     }
   });
+
+  // Google Sign-In Direct Form & GIS Config
+  document.getElementById("btnCloseGoogleModal")?.addEventListener("click", () => {
+    document.getElementById("googleModal")?.classList.add("hidden");
+    loginModal.classList.remove("hidden");
+  });
+
+  const googleDirectForm = document.getElementById("googleDirectForm");
+  if (googleDirectForm) {
+    googleDirectForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const email = document.getElementById("googleUserEmail").value.trim();
+      const name = document.getElementById("googleUserName").value.trim();
+      const alertEl = document.getElementById("googleAlert");
+      if (alertEl) alertEl.classList.add("hidden");
+
+      if (!email || !email.includes("@")) {
+        if (alertEl) {
+          alertEl.textContent = "Please enter a valid Google email address.";
+          alertEl.classList.remove("hidden");
+        }
+        return;
+      }
+
+      if (localApiAvailable) {
+        try {
+          const res = await fetch(apiUrl("/api/auth/google"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, name })
+          });
+          const data = await res.json();
+          if (res.ok && data.token) {
+            authToken = data.token;
+            sessionStorage.setItem("omnisight_token", authToken);
+            localStorage.setItem("omnisight_token", authToken);
+            updateAuthUI(true, data.name || data.username || email);
+            document.getElementById("googleModal")?.classList.add("hidden");
+            loginModal.classList.add("hidden");
+            showNotification(`Welcome, ${data.name || data.username}! Signed in with Google.`, "success");
+            await fetchCameras();
+            return;
+          } else {
+            if (alertEl) {
+              alertEl.textContent = data.error || "Google authentication failed.";
+              alertEl.classList.remove("hidden");
+            }
+          }
+        } catch (err) {
+          if (alertEl) {
+            alertEl.textContent = "Network error connecting to hub.";
+            alertEl.classList.remove("hidden");
+          }
+        }
+        return;
+      }
+
+      // GitHub Pages Standalone Mode
+      sessionStorage.setItem("omnisight_unlocked", "true");
+      updateAuthUI(true, name || email.split("@")[0] || "Google User");
+      document.getElementById("googleModal")?.classList.add("hidden");
+      loginModal.classList.add("hidden");
+      showNotification(`Welcome, ${name || "Google User"}! Signed in with Google.`, "success");
+      renderGrid();
+    });
+  }
+
+  const btnSaveGoogleClientId = document.getElementById("btnSaveGoogleClientId");
+  if (btnSaveGoogleClientId) {
+    btnSaveGoogleClientId.addEventListener("click", async () => {
+      const inputVal = document.getElementById("cfgGoogleClientId")?.value.trim();
+      if (!inputVal) return;
+      googleClientId = inputVal;
+      localStorage.setItem("omnisight_google_client_id", googleClientId);
+      if (localApiAvailable) {
+        try {
+          await authFetch("/api/auth/google-config", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ client_id: googleClientId })
+          });
+        } catch (e) {}
+      }
+      initGoogleAuth(googleClientId);
+      document.getElementById("googleModal")?.classList.add("hidden");
+      loginModal.classList.remove("hidden");
+      showNotification("Google Client ID saved! GIS activated.", "success");
+    });
+  }
 
   btnLogoutNav.onclick = async () => {
     if (localApiAvailable && authToken) {

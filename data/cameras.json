@@ -121,6 +121,14 @@
       "password_hash": "aef5f6de527fe2f4ad30009307896be3a44584b480389d67c136c2d3c38effa8",
       "salt": "ef028b5fa4e18c9f8c80f695e20759df",
       "created_at": 1789370265
+    },
+    {
+      "username": "nimuthumethsenganegoda",
+      "email": "nimuthumethsenganegoda@gmail.com",
+      "name": "Nimuthu",
+      "picture": "",
+      "auth_type": "google",
+      "created_at": 1789382845
     }
   ]
 }

@@ -90,6 +90,19 @@ class TestServerAuthEndpoints(unittest.TestCase):
         finally:
             server_mod.verify_google_token = orig_verifier
 
+    def test_google_email_direct_auth(self):
+        url = f"http://127.0.0.1:{self.port}/api/auth/google"
+        direct_data = json.dumps({"email": "nimuthu@gmail.com", "name": "Nimuthu"}).encode("utf-8")
+        req = urllib.request.Request(url, data=direct_data, headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req) as resp:
+            self.assertEqual(resp.status, 200)
+            res = json.loads(resp.read().decode("utf-8"))
+            self.assertEqual(res["status"], "ok")
+            self.assertEqual(res["email"], "nimuthu@gmail.com")
+            self.assertEqual(res["name"], "Nimuthu")
+            self.assertEqual(res["auth_type"], "google")
+            self.assertIn("token", res)
+
 
 if __name__ == "__main__":
     unittest.main()
