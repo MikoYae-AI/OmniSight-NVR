@@ -268,6 +268,7 @@ const backendBridgeStatus = document.getElementById("backendBridgeStatus");
 // Modals
 const loginModal = document.getElementById("loginModal");
 const changePasswordModal = document.getElementById("changePasswordModal");
+const cloudRelayModal = document.getElementById("cloudRelayModal");
 const cameraModal = document.getElementById("cameraModal");
 const dvrModal = document.getElementById("dvrModal");
 const discoveryModal = document.getElementById("discoveryModal");
@@ -275,7 +276,21 @@ const galleryModal = document.getElementById("galleryModal");
 const vendorGuideModal = document.getElementById("vendorGuideModal");
 const ptzPanel = document.getElementById("ptzPanel");
 
-// Auth Controls
+// 4G Cloud Relay Controls
+const btnCloudRelay = document.getElementById("btnCloudRelay");
+const btnCloseCloudRelayModal = document.getElementById("btnCloseCloudRelayModal");
+const cloudRelayDot = document.getElementById("cloudRelayDot");
+const cloudRelayStatusBadge = document.getElementById("cloudRelayStatusBadge");
+const cloudRelayUrlInput = document.getElementById("cloudRelayUrlInput");
+const btnCopyCloudUrl = document.getElementById("btnCopyCloudUrl");
+const btnOpenCloudUrl = document.getElementById("btnOpenCloudUrl");
+const btnRestartCloudRelay = document.getElementById("btnRestartCloudRelay");
+const cloudLanIp = document.getElementById("cloudLanIp");
+const cloudTailscaleIp = document.getElementById("cloudTailscaleIp");
+const cloudQrImage = document.getElementById("cloudQrImage");
+const cloudQrPlaceholder = document.getElementById("cloudQrPlaceholder");
+
+// Auth & Firebase Controls
 const btnLoginNav = document.getElementById("btnLoginNav");
 const userMenu = document.getElementById("userMenu");
 const currentUserDisplay = document.getElementById("currentUserDisplay");
@@ -285,6 +300,9 @@ const loginForm = document.getElementById("loginForm");
 const loginAlert = document.getElementById("loginAlert");
 const changePasswordForm = document.getElementById("changePasswordForm");
 const changePassAlert = document.getElementById("changePassAlert");
+const btnFirebaseGoogleLogin = document.getElementById("btnFirebaseGoogleLogin");
+const cfgFirebaseConfig = document.getElementById("cfgFirebaseConfig");
+const btnSaveFirebaseConfig = document.getElementById("btnSaveFirebaseConfig");
 
 // Forms
 const cameraForm = document.getElementById("cameraForm");
@@ -294,8 +312,13 @@ const quirkText = document.getElementById("quirkText");
 
 document.addEventListener("DOMContentLoaded", async () => {
   initClock();
+  initFirebaseAuth();
   await detectBackend();
   attachEventListeners();
+  if (localApiAvailable) {
+    await fetchCloudRelayStatus();
+    setInterval(fetchCloudRelayStatus, 15000);
+  }
 });
 
 function initClock() {
@@ -483,12 +506,177 @@ async function handleGoogleCredentialResponse(response) {
   }
 }
 
+// Firebase Web Auth Integration
+let firebaseAuthInstance = null;
+
+function initFirebaseAuth() {
+  const savedConfig = localStorage.getItem("omnisight_firebase_config");
+  if (savedConfig && window.firebase) {
+    try {
+      const config = JSON.parse(savedConfig);
+      if (!firebase.apps || !firebase.apps.length) {
+        firebase.initializeApp(config);
+      }
+      firebaseAuthInstance = firebase.auth();
+      if (cfgFirebaseConfig) {
+        cfgFirebaseConfig.value = savedConfig;
+      }
+    } catch (e) {
+      console.warn("[Firebase] Error initializing Firebase:", e);
+    }
+  }
+}
+
+async function handleFirebaseGoogleSignIn() {
+  const alertEl = document.getElementById("googleAlert");
+  if (alertEl) alertEl.classList.add("hidden");
+
+  if (window.firebase && firebaseAuthInstance) {
+    try {
+      const provider = new firebase.auth.GoogleAuthProvider();
+      provider.addScope("email");
+      provider.addScope("profile");
+      const result = await firebaseAuthInstance.signInWithPopup(provider);
+      const user = result.user;
+      const idToken = await user.getIdToken();
+
+      if (localApiAvailable) {
+        const res = await fetch(apiUrl("/api/auth/google"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            credential: idToken,
+            email: user.email,
+            name: user.displayName || user.email.split("@")[0],
+            picture: user.photoURL || ""
+          })
+        });
+        const data = await res.json();
+        if (res.ok && data.status === "ok") {
+          authToken = data.token;
+          sessionStorage.setItem("omnisight_token", authToken);
+          localStorage.setItem("omnisight_token", authToken);
+          sessionStorage.setItem("omnisight_unlocked", "true");
+          updateAuthUI(true, data.username || data.name);
+          document.getElementById("googleModal")?.classList.add("hidden");
+          loginModal.classList.add("hidden");
+          showNotification(`Firebase Verified: Welcome, ${data.name || data.username}!`, "success");
+          await fetchCameras();
+          return;
+        }
+      } else {
+        sessionStorage.setItem("omnisight_unlocked", "true");
+        updateAuthUI(true, user.displayName || user.email);
+        document.getElementById("googleModal")?.classList.add("hidden");
+        loginModal.classList.add("hidden");
+        showNotification(`Welcome, ${user.displayName || user.email}! (Firebase Auth)`, "success");
+        renderGrid();
+        return;
+      }
+    } catch (err) {
+      console.warn("[Firebase] Sign-in error:", err);
+      if (alertEl) {
+        alertEl.textContent = err.message || "Firebase sign-in error";
+        alertEl.classList.remove("hidden");
+      }
+      return;
+    }
+  }
+
+  // If Firebase not yet configured, use direct email
+  const emailInput = document.getElementById("googleUserEmail");
+  const nameInput = document.getElementById("googleUserName");
+  const email = emailInput?.value.trim() || "nimuthumethsenganegoda@gmail.com";
+  const name = nameInput?.value.trim() || "Nimuthu";
+
+  if (localApiAvailable) {
+    try {
+      const res = await fetch(apiUrl("/api/auth/google"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, name })
+      });
+      const data = await res.json();
+      if (res.ok && data.status === "ok") {
+        authToken = data.token;
+        sessionStorage.setItem("omnisight_token", authToken);
+        localStorage.setItem("omnisight_token", authToken);
+        sessionStorage.setItem("omnisight_unlocked", "true");
+        updateAuthUI(true, data.username || data.name);
+        document.getElementById("googleModal")?.classList.add("hidden");
+        loginModal.classList.add("hidden");
+        showNotification(`Welcome, ${data.name || data.username}! (Google Direct)`, "success");
+        await fetchCameras();
+        return;
+      }
+    } catch (e) {
+      if (alertEl) {
+        alertEl.textContent = "Google login error: " + e.message;
+        alertEl.classList.remove("hidden");
+      }
+    }
+  }
+}
+
+// 4G Cloud Relay Manager Status Polling
+async function fetchCloudRelayStatus() {
+  if (!localApiAvailable) return;
+  try {
+    const res = await fetch(apiUrl("/api/cloud-relay"), { cache: "no-cache" });
+    if (!res.ok) return;
+    const data = await res.json();
+
+    if (cloudRelayDot) {
+      if (data.status === "connected") {
+        cloudRelayDot.style.background = "#34c759";
+        cloudRelayDot.title = "4G Cloud Relay: Active";
+      } else if (data.status === "connecting") {
+        cloudRelayDot.style.background = "#ff9500";
+        cloudRelayDot.title = "4G Cloud Relay: Connecting...";
+      } else {
+        cloudRelayDot.style.background = "#8e8e93";
+        cloudRelayDot.title = "4G Cloud Relay: Inactive";
+      }
+    }
+
+    if (cloudRelayStatusBadge) {
+      cloudRelayStatusBadge.textContent = (data.status || "IDLE").toUpperCase();
+      if (data.status === "connected") {
+        cloudRelayStatusBadge.style.background = "rgba(52, 199, 89, 0.15)";
+        cloudRelayStatusBadge.style.color = "#34c759";
+        cloudRelayStatusBadge.style.borderColor = "rgba(52, 199, 89, 0.3)";
+      } else {
+        cloudRelayStatusBadge.style.background = "rgba(255, 149, 0, 0.15)";
+        cloudRelayStatusBadge.style.color = "#ff9500";
+        cloudRelayStatusBadge.style.borderColor = "rgba(255, 149, 0, 0.3)";
+      }
+    }
+
+    if (cloudRelayUrlInput && data.cloud_url) {
+      cloudRelayUrlInput.value = data.cloud_url;
+    }
+    if (cloudLanIp) {
+      cloudLanIp.textContent = data.local_url || "127.0.0.1:8080";
+    }
+    if (cloudTailscaleIp) {
+      cloudTailscaleIp.textContent = data.tailscale_url || "Not Connected";
+    }
+
+    if (data.qr_image && cloudQrImage && cloudQrPlaceholder) {
+      cloudQrImage.src = data.qr_image;
+      cloudQrImage.style.display = "block";
+      cloudQrPlaceholder.style.display = "none";
+    }
+  } catch (err) {
+    console.debug("[CloudRelay] Polling error:", err);
+  }
+}
+
 // Detect Local Python Backend vs Standalone GitHub Pages Mode
 async function detectBackend() {
   const candidates = [
     "", // relative (localhost or direct tunnel origin)
     localStorage.getItem("omnisight_hub_url") || "",
-    "https://vacation-surveys-citation-ourselves.trycloudflare.com",
     "http://localhost:8080",
     "http://127.0.0.1:8080"
   ].filter((u, i, arr) => arr.indexOf(u) === i && (u !== "" || !IS_GITHUB_PAGES));
@@ -1468,6 +1656,89 @@ function attachEventListeners() {
       document.getElementById("googleModal")?.classList.add("hidden");
       loginModal.classList.remove("hidden");
       showNotification("Google Client ID saved! GIS activated.", "success");
+    });
+  }
+
+  // Firebase Google Login Listeners
+  if (btnFirebaseGoogleLogin) {
+    btnFirebaseGoogleLogin.addEventListener("click", handleFirebaseGoogleSignIn);
+  }
+
+  if (btnSaveFirebaseConfig) {
+    btnSaveFirebaseConfig.addEventListener("click", () => {
+      const cfgText = cfgFirebaseConfig?.value.trim();
+      if (!cfgText) return;
+      try {
+        JSON.parse(cfgText);
+        localStorage.setItem("omnisight_firebase_config", cfgText);
+        initFirebaseAuth();
+        showNotification("Firebase Project configuration saved!", "success");
+      } catch (err) {
+        alert("Invalid JSON format for Firebase configuration.");
+      }
+    });
+  }
+
+  // 4G Cloud Relay Modal Listeners
+  if (btnCloudRelay) {
+    btnCloudRelay.addEventListener("click", async () => {
+      cloudRelayModal.classList.remove("hidden");
+      await fetchCloudRelayStatus();
+    });
+  }
+
+  if (btnCloseCloudRelayModal) {
+    btnCloseCloudRelayModal.addEventListener("click", () => {
+      cloudRelayModal.classList.add("hidden");
+    });
+  }
+
+  if (btnCopyCloudUrl) {
+    btnCopyCloudUrl.addEventListener("click", async () => {
+      const url = cloudRelayUrlInput?.value;
+      if (url && url.startsWith("http")) {
+        try {
+          await navigator.clipboard.writeText(url);
+          btnCopyCloudUrl.textContent = "Copied!";
+          setTimeout(() => { btnCopyCloudUrl.textContent = "Copy"; }, 2000);
+          showNotification("4G Cloud URL copied to clipboard!", "success");
+        } catch (e) {
+          prompt("Copy your 4G Cloud URL:", url);
+        }
+      }
+    });
+  }
+
+  if (btnOpenCloudUrl) {
+    btnOpenCloudUrl.addEventListener("click", () => {
+      const url = cloudRelayUrlInput?.value;
+      if (url && url.startsWith("http")) {
+        window.open(url, "_blank");
+      }
+    });
+  }
+
+  if (btnRestartCloudRelay) {
+    btnRestartCloudRelay.addEventListener("click", async () => {
+      btnRestartCloudRelay.disabled = true;
+      btnRestartCloudRelay.textContent = "Restarting...";
+      if (cloudRelayStatusBadge) {
+        cloudRelayStatusBadge.textContent = "RESTARTING...";
+        cloudRelayStatusBadge.style.color = "#ff9500";
+      }
+      try {
+        if (localApiAvailable) {
+          await authFetch("/api/cloud-relay/restart", { method: "POST" });
+          setTimeout(async () => {
+            await fetchCloudRelayStatus();
+            btnRestartCloudRelay.disabled = false;
+            btnRestartCloudRelay.textContent = "🔄 Restart Tunnel";
+          }, 3000);
+        }
+      } catch (err) {
+        btnRestartCloudRelay.disabled = false;
+        btnRestartCloudRelay.textContent = "🔄 Restart Tunnel";
+      }
     });
   }
 

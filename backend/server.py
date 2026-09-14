@@ -19,12 +19,14 @@ try:
     from .vendor_presets import VENDOR_PRESETS, build_stream_url
     from .discovery import run_full_discovery
     from .recorder import RecorderManager
+    from .cloud_relay import CloudRelayManager
 except (ImportError, ValueError):
     from config_manager import ConfigManager
     from stream_proxy import StreamManager
     from vendor_presets import VENDOR_PRESETS, build_stream_url
     from discovery import run_full_discovery
     from recorder import RecorderManager
+    from cloud_relay import CloudRelayManager
 
 STATIC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "static"))
 SNAPSHOTS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "snapshots"))
@@ -32,6 +34,7 @@ SNAPSHOTS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "d
 config_manager = ConfigManager()
 stream_manager = StreamManager(config_manager)
 recorder_manager = RecorderManager(stream_manager)
+cloud_relay_manager = CloudRelayManager(port=8080)
 
 
 def verify_google_token(token: str, client_id: str = "") -> Optional[Dict[str, Any]]:
@@ -188,6 +191,11 @@ class OmniSightHandler(BaseHTTPRequestHandler):
                 "auth_required": True,
                 "google_client_id": config_manager.get_google_client_id()
             })
+            return
+
+        # Public API: 4G Cloud Relay Status
+        if path == "/api/cloud-relay":
+            self.send_json(cloud_relay_manager.get_status())
             return
 
         # Public API: Current session info
@@ -378,6 +386,22 @@ class OmniSightHandler(BaseHTTPRequestHandler):
                 self.send_json({"status": "ok", "message": "Password updated successfully"})
             else:
                 self.send_json({"error": "Invalid current password"}, 400)
+            return
+
+        # API: 4G Cloud Relay Toggle
+        if path == "/api/cloud-relay/toggle":
+            enable = body_data.get("enable", True)
+            if enable:
+                cloud_relay_manager.start()
+            else:
+                cloud_relay_manager.stop()
+            self.send_json(cloud_relay_manager.get_status())
+            return
+
+        # API: 4G Cloud Relay Restart
+        if path == "/api/cloud-relay/restart":
+            cloud_relay_manager.restart()
+            self.send_json(cloud_relay_manager.get_status())
             return
 
         # API: Add camera
@@ -634,12 +658,17 @@ class OmniSightHandler(BaseHTTPRequestHandler):
             pass
 
 
-def run_server(host: str = "0.0.0.0", port: int = 8080):
+def run_server(host: str = "0.0.0.0", port: int = 8080, enable_cloud: bool = True):
+    cloud_relay_manager.port = port
+    if enable_cloud:
+        cloud_relay_manager.start()
+
     server = ThreadingHTTPServer((host, port), OmniSightHandler)
     print("=" * 65)
     print(f"  ✦ OmniSight-NVR Universal Surveillance Hub Online ✦")
     print(f"  Local Web Dashboard: http://localhost:{port}")
     print(f"  Network Dashboard:   http://0.0.0.0:{port}")
+    print(f"  4G Cloud Relay:      {'INITIALIZING' if enable_cloud else 'DISABLED'}")
     print(f"  Supported Hardware:  Hikvision, Dahua, Xiongmai (XM), Tapo,")
     print(f"                       Reolink, Yoosee, V380, and Generic ONVIF")
     print("=" * 65)
@@ -647,14 +676,22 @@ def run_server(host: str = "0.0.0.0", port: int = 8080):
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nShutting down OmniSight-NVR...")
+    finally:
+        cloud_relay_manager.stop()
         server.shutdown()
 
 
 if __name__ == "__main__":
     port = 8080
-    if len(sys.argv) > 1:
-        try:
-            port = int(sys.argv[1])
-        except ValueError:
-            pass
-    run_server(port=port)
+    enable_cloud = True
+    for arg in sys.argv[1:]:
+        if arg == "--no-cloud":
+            enable_cloud = False
+        elif arg == "--cloud":
+            enable_cloud = True
+        else:
+            try:
+                port = int(arg)
+            except ValueError:
+                pass
+    run_server(port=port, enable_cloud=enable_cloud)

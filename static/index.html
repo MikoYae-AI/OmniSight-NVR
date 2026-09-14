@@ -12,6 +12,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Cinzel:wght@500;700&display=swap" rel="stylesheet">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
 </head>
 <body class="theme-gothic">
   <div class="app-container">
@@ -59,6 +61,9 @@
 
         <!-- Action Buttons -->
         <div class="action-buttons">
+          <button class="btn-action btn-cloud" id="btnCloudRelay" title="4G / Cellular Cloud Remote Access & QR Code" style="border-color: rgba(52, 199, 89, 0.4); background: rgba(52, 199, 89, 0.12); color: #34c759; font-weight: 600;">
+            <span class="icon">📶</span> 4G Cloud <span id="cloudRelayDot" style="display:inline-block; width:7px; height:7px; border-radius:50%; background:#34c759; margin-left:3px;"></span>
+          </button>
           <button class="btn-action btn-primary" id="btnAddCamera">
             <span class="icon">+</span> Add Camera
           </button>
@@ -203,6 +208,23 @@
 
         <div class="auth-alert hidden" id="googleAlert"></div>
 
+        <!-- Firebase Google Popup Button -->
+        <button type="button" class="btn-action btn-secondary" id="btnFirebaseGoogleLogin" style="width: 100%; justify-content: center; gap: 8px; margin-bottom: 12px; background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2);">
+          <svg width="18" height="18" viewBox="0 0 48 48">
+            <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+            <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+            <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+            <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+          </svg>
+          <span style="font-weight: 500;">Instant Firebase Google Sign-In</span>
+        </button>
+
+        <div style="display: flex; align-items: center; gap: 10px; margin: 10px 0; color: var(--text-muted); font-size: 11px;">
+          <div style="flex: 1; height: 1px; background: rgba(255,255,255,0.08);"></div>
+          <span>OR DIRECT GOOGLE AUTH</span>
+          <div style="flex: 1; height: 1px; background: rgba(255,255,255,0.08);"></div>
+        </div>
+
         <div class="form-group">
           <label for="googleUserEmail">Google / Gmail Address</label>
           <input type="email" id="googleUserEmail" name="email" required placeholder="nimuthumethsenganegoda@gmail.com" value="nimuthumethsenganegoda@gmail.com" autocomplete="email">
@@ -219,7 +241,18 @@
           </button>
         </div>
 
-        <div style="margin-top: 16px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 12px;">
+        <div style="margin-top: 16px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 12px; display: flex; flex-direction: column; gap: 8px;">
+          <details style="font-size: 12px; color: var(--text-secondary); cursor: pointer;">
+            <summary style="outline: none; color: #ffca28; font-weight: 500;">🔥 Configure Firebase Project (Optional)</summary>
+            <div style="margin-top: 10px; display: flex; flex-direction: column; gap: 8px;">
+              <p style="font-size: 11px; margin: 0; color: var(--text-muted);">Paste your Firebase Web App config JSON or Project ID to bind live Firebase Auth:</p>
+              <textarea id="cfgFirebaseConfig" rows="3" placeholder='{"apiKey": "...", "authDomain": "...", "projectId": "..."}' style="font-size: 11px; padding: 6px 10px; font-family: monospace;"></textarea>
+              <button type="button" class="btn-action" id="btnSaveFirebaseConfig" style="font-size: 11px; justify-content: center; padding: 6px 12px;">
+                Save Firebase Configuration
+              </button>
+            </div>
+          </details>
+
           <details style="font-size: 12px; color: var(--text-secondary); cursor: pointer;">
             <summary style="outline: none; color: var(--apple-blue); font-weight: 500;">⚙️ Link Google Cloud OAuth Client ID (Optional)</summary>
             <div style="margin-top: 10px; display: flex; flex-direction: column; gap: 8px;">
@@ -265,6 +298,64 @@
           <button type="submit" class="btn-action btn-primary">Save New Password</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- MODAL: 4G Cloud Relay & Mobile Remote -->
+  <div class="modal-overlay hidden" id="cloudRelayModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 20px;">📶</span>
+          <h3 style="margin: 0;">4G Mobile Cloud Relay</h3>
+        </div>
+        <button class="btn-close" id="btnCloseCloudRelayModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="section-desc">Stream camera feeds on cellular 4G/5G data or any remote network with zero port-forwarding and carrier-grade NAT traversal.</p>
+
+        <!-- Status Card -->
+        <div style="background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; padding: 16px; margin-bottom: 16px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <span style="font-size: 13px; color: var(--text-secondary); font-weight: 500;">Relay Status</span>
+            <span id="cloudRelayStatusBadge" style="background: rgba(52, 199, 89, 0.15); color: #34c759; border: 1px solid rgba(52, 199, 89, 0.3); padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600;">ACTIVE</span>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 12px;">
+            <label style="font-size: 11px; color: var(--text-muted);">Global 4G Cloud URL (HTTPS)</label>
+            <div style="display: flex; gap: 8px;">
+              <input type="text" id="cloudRelayUrlInput" readonly value="Connecting to edge relay..." style="font-family: monospace; font-size: 12px; padding: 8px 12px; flex: 1; background: rgba(0,0,0,0.3);">
+              <button type="button" class="btn-action btn-secondary" id="btnCopyCloudUrl" style="padding: 8px 14px; font-size: 12px;">Copy</button>
+            </div>
+          </div>
+
+          <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-secondary); padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06);">
+            <span>LAN: <code id="cloudLanIp" style="color: var(--apple-blue);">Detecting...</code></span>
+            <span>Tailscale: <code id="cloudTailscaleIp" style="color: #bf5af2;">Detecting...</code></span>
+          </div>
+        </div>
+
+        <!-- QR Code Centerpiece -->
+        <div style="text-align: center; margin: 16px 0;">
+          <div style="display: inline-block; padding: 12px; background: #ffffff; border-radius: 14px; box-shadow: 0 8px 24px rgba(0,0,0,0.4);">
+            <img id="cloudQrImage" src="" alt="4G Remote Access QR" style="width: 180px; height: 180px; display: none; margin: 0 auto; image-rendering: pixelated;">
+            <div id="cloudQrPlaceholder" style="width: 180px; height: 180px; display: flex; align-items: center; justify-content: center; color: #333; font-size: 12px;">Generating QR...</div>
+          </div>
+          <p style="margin-top: 10px; font-size: 12px; color: var(--text-secondary);">
+            Point your iPhone or Android camera at this QR code to view live streams on 4G/cellular.
+          </p>
+        </div>
+
+        <!-- Controls -->
+        <div style="display: flex; gap: 10px; margin-top: 14px;">
+          <button type="button" class="btn-action btn-secondary" id="btnRestartCloudRelay" style="flex: 1; justify-content: center;">
+            <span>🔄 Restart Tunnel</span>
+          </button>
+          <button type="button" class="btn-action btn-primary" id="btnOpenCloudUrl" style="flex: 1; justify-content: center;">
+            <span>↗ Open Cloud URL</span>
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 

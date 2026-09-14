@@ -2,7 +2,7 @@
   "version": "1.0.0",
   "system_name": "OmniSight-NVR Hub",
   "theme": "dark_gothic",
-  "grid_layout": "1x1",
+  "grid_layout": "4x4",
   "cameras": [
     {
       "id": "cam-hikvision-13",
@@ -102,6 +102,24 @@
       "resolution": "1920x1080",
       "ptz": true,
       "notes": "TP-Link Tapo indoor pan/tilt surveillance."
+    },
+    {
+      "name": "HIKVISION (192.168.1.13)",
+      "group": "Default",
+      "vendor": "hikvision",
+      "channel": 1,
+      "ip": "192.168.1.13",
+      "port": 554,
+      "username": "admin ",
+      "password": "Hik@1234",
+      "stream_url": "rtsp://192.168.1.13:554/Streaming/Channels/101",
+      "ptz": true,
+      "legacy_polling": true,
+      "is_simulated": true,
+      "id": "cam-c67cb16c",
+      "status": "online",
+      "fps": 25,
+      "resolution": "1920x1080"
     }
   ],
   "groups": [
