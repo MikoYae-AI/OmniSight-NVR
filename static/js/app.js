@@ -13,6 +13,7 @@ let activeFilter = "All";
 let activePtzCamId = null;
 let activePtzSession = { pan: 0.0, tilt: 0.0, zoom: 1.0 };
 let pollingIntervals = {};
+let authToken = sessionStorage.getItem("omnisight_token") || localStorage.getItem("omnisight_token") || "";
 
 // Fallback Default Cameras (For pure client-side GitHub Pages mode)
 const DEFAULT_CLIENT_CAMERAS = [
@@ -215,13 +216,25 @@ const hubModeText = document.getElementById("hubModeText");
 const backendBridgeStatus = document.getElementById("backendBridgeStatus");
 
 // Modals
+const loginModal = document.getElementById("loginModal");
+const changePasswordModal = document.getElementById("changePasswordModal");
 const cameraModal = document.getElementById("cameraModal");
 const dvrModal = document.getElementById("dvrModal");
 const discoveryModal = document.getElementById("discoveryModal");
-const legacyFixModal = document.getElementById("legacyFixModal");
 const galleryModal = document.getElementById("galleryModal");
 const vendorGuideModal = document.getElementById("vendorGuideModal");
 const ptzPanel = document.getElementById("ptzPanel");
+
+// Auth Controls
+const btnLoginNav = document.getElementById("btnLoginNav");
+const userMenu = document.getElementById("userMenu");
+const currentUserDisplay = document.getElementById("currentUserDisplay");
+const btnChangePassNav = document.getElementById("btnChangePassNav");
+const btnLogoutNav = document.getElementById("btnLogoutNav");
+const loginForm = document.getElementById("loginForm");
+const loginAlert = document.getElementById("loginAlert");
+const changePasswordForm = document.getElementById("changePasswordForm");
+const changePassAlert = document.getElementById("changePassAlert");
 
 // Forms
 const cameraForm = document.getElementById("cameraForm");
@@ -242,6 +255,35 @@ function initClock() {
   }
   update();
   setInterval(update, 1000);
+}
+
+// Authenticated Fetch Helper
+async function authFetch(url, options = {}) {
+  options.headers = options.headers || {};
+  if (authToken) {
+    options.headers["Authorization"] = `Bearer ${authToken}`;
+  }
+  const res = await fetch(url, options);
+  if (res.status === 401 && localApiAvailable) {
+    // Unauthorized: prompt login modal
+    updateAuthUI(false);
+    loginAlert.classList.remove("hidden");
+    loginAlert.textContent = "Session expired or authentication required.";
+    loginModal.classList.remove("hidden");
+  }
+  return res;
+}
+
+// Update UI based on authentication state
+function updateAuthUI(authenticated, username = "admin") {
+  if (authenticated) {
+    btnLoginNav.classList.add("hidden");
+    userMenu.classList.remove("hidden");
+    currentUserDisplay.textContent = `👤 ${username}`;
+  } else {
+    btnLoginNav.classList.remove("hidden");
+    userMenu.classList.add("hidden");
+  }
 }
 
 // Detect Local Python Backend vs Standalone GitHub Pages Mode
@@ -265,6 +307,26 @@ async function detectBackend() {
         ffmpegStatus.textContent = "RTSP Engine: Standalone Engine Active";
       }
 
+      // Check current session
+      if (authToken) {
+        const meRes = await authFetch("/api/auth/me");
+        if (meRes.ok) {
+          const me = await meRes.json();
+          if (me.authenticated) {
+            updateAuthUI(true, me.username);
+          } else {
+            authToken = "";
+            sessionStorage.removeItem("omnisight_token");
+            localStorage.removeItem("omnisight_token");
+            updateAuthUI(false);
+            loginModal.classList.remove("hidden");
+          }
+        }
+      } else {
+        updateAuthUI(false);
+        loginModal.classList.remove("hidden");
+      }
+
       await fetchPresets();
       await fetchCameras();
       return;
@@ -280,6 +342,20 @@ async function detectBackend() {
   backendBridgeStatus.textContent = "Cloud Deployment: https://mikoyae-ai.github.io/OmniSight-NVR/";
   ffmpegStatus.textContent = "ActiveX / IE Mode: Direct HTML5 Snapshot Polling Ready";
   
+  // In Cloud mode, check passcode lock if configured
+  const savedPasscode = localStorage.getItem("omnisight_passcode");
+  if (savedPasscode) {
+    const sessionUnlocked = sessionStorage.getItem("omnisight_unlocked");
+    if (sessionUnlocked) {
+      updateAuthUI(true, "Cloud User");
+    } else {
+      updateAuthUI(false);
+      loginModal.classList.remove("hidden");
+    }
+  } else {
+    updateAuthUI(true, "Guest");
+  }
+
   vendorPresets = BUILTIN_PRESETS;
   loadLocalCameras();
 }
@@ -318,9 +394,11 @@ async function fetchPresets() {
     return;
   }
   try {
-    const res = await fetch("/api/presets");
-    vendorPresets = await res.json();
-    updateVendorQuirks();
+    const res = await authFetch("/api/presets");
+    if (res.ok) {
+      vendorPresets = await res.json();
+      updateVendorQuirks();
+    }
   } catch (err) {
     vendorPresets = BUILTIN_PRESETS;
   }
@@ -333,13 +411,15 @@ async function fetchCameras() {
     return;
   }
   try {
-    const res = await fetch("/api/cameras");
-    const data = await res.json();
-    cameras = data.cameras || [];
-    currentLayout = data.layout || "2x2";
-    setLayout(currentLayout, false);
-    renderGroupPills(data.groups || ["All"]);
-    renderGrid();
+    const res = await authFetch("/api/cameras");
+    if (res.ok) {
+      const data = await res.json();
+      cameras = data.cameras || [];
+      currentLayout = data.layout || "2x2";
+      setLayout(currentLayout, false);
+      renderGroupPills(data.groups || ["All"]);
+      renderGrid();
+    }
   } catch (err) {
     loadLocalCameras();
   }
@@ -383,7 +463,7 @@ function setLayout(layout, save = true) {
 
   if (save) {
     if (localApiAvailable) {
-      fetch("/api/layout", {
+      authFetch("/api/layout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ layout })
@@ -451,7 +531,7 @@ function renderGrid() {
   });
 }
 
-// Setup Camera Video Stream Player (Handles Local Server MJPEG vs Legacy Snapshot Polling vs Procedural Canvas)
+// Setup Camera Video Stream Player
 function setupCameraPlayer(cam) {
   const container = document.getElementById(`videoContainer-${cam.id}`);
   if (!container) return;
@@ -460,20 +540,19 @@ function setupCameraPlayer(cam) {
     // Connected to Python server: use native multipart MJPEG
     const img = document.createElement("img");
     img.className = "video-feed";
-    img.src = `/api/cameras/${cam.id}/stream`;
+    img.src = `/api/cameras/${cam.id}/stream?token=${encodeURIComponent(authToken)}`;
     img.alt = cam.name;
     container.insertBefore(img, container.firstChild);
     return;
   }
 
-  // Legacy Snapshot Polling Mode (Zero ActiveX / No Internet Explorer Needed)
+  // Legacy Snapshot Polling Mode
   if (cam.legacy_polling && cam.ip) {
     const img = document.createElement("img");
     img.className = "video-feed";
     img.alt = cam.name;
     container.insertBefore(img, container.firstChild);
 
-    // Construct snapshot URL
     let snapUrl = "";
     if (cam.vendor === "hikvision" || cam.vendor === "hikvision_dvr") {
       snapUrl = `http://${cam.ip}/ISAPI/Streaming/channels/${cam.channel || 1}01/picture`;
@@ -487,18 +566,17 @@ function setupCameraPlayer(cam) {
       const testImg = new Image();
       testImg.onload = () => { img.src = testImg.src; };
       testImg.onerror = () => {
-        // If direct HTTP is blocked by HTTPS on GitHub pages, render tactical placeholder
         drawTacticalFallback(container, cam, "ACTIVE POLLING • MIXED CONTENT RESTRICTION");
       };
       testImg.src = `${snapUrl}?t=${Date.now()}`;
     }
 
     pollFrame();
-    pollingIntervals[cam.id] = setInterval(pollFrame, 500); // 2 FPS snapshot polling
+    pollingIntervals[cam.id] = setInterval(pollFrame, 500);
     return;
   }
 
-  // In-Browser Procedural Canvas Simulation (For GitHub Pages Standalone preview)
+  // In-Browser Procedural Canvas Simulation
   const canvas = document.createElement("canvas");
   canvas.className = "video-feed";
   canvas.width = 640;
@@ -595,11 +673,11 @@ function startCanvasSimulation(canvas, cam) {
     }
   }
 
-  const animTimer = setInterval(render, 50); // 20 FPS in-browser simulation
+  const animTimer = setInterval(render, 50);
   pollingIntervals[`canvas-${cam.id}`] = animTimer;
 }
 
-// Fallback visual message for GitHub Pages Mixed Content
+// Fallback visual message
 function drawTacticalFallback(container, cam, message) {
   let fb = container.querySelector(".fallback-banner");
   if (!fb) {
@@ -653,7 +731,7 @@ async function captureSnapshot(camId, camName) {
   flashScreen();
   if (localApiAvailable) {
     try {
-      const res = await fetch("/api/snapshots/capture", {
+      const res = await authFetch("/api/snapshots/capture", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ camera_id: camId })
@@ -666,7 +744,7 @@ async function captureSnapshot(camId, camName) {
     } catch (e) {}
   }
 
-  // Client-side snapshot: grab from canvas or img
+  // Client-side snapshot
   const container = document.getElementById(`videoContainer-${camId}`);
   const canvas = container ? container.querySelector("canvas") : null;
   if (canvas) {
@@ -710,17 +788,18 @@ document.querySelectorAll(".ptz-btn").forEach(btn => {
     const action = btn.dataset.ptz;
     if (localApiAvailable) {
       try {
-        const res = await fetch(`/api/cameras/${activePtzCamId}/ptz`, {
+        const res = await authFetch(`/api/cameras/${activePtzCamId}/ptz`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action })
         });
-        const data = await res.json();
-        document.getElementById("ptzTelemetry").textContent = 
-          `PAN: ${data.pan >= 0 ? '+' : ''}${data.pan.toFixed(1)}° | TILT: ${data.tilt >= 0 ? '+' : ''}${data.tilt.toFixed(1)}° | ZOOM: ${data.zoom.toFixed(1)}x`;
+        if (res.ok) {
+          const data = await res.json();
+          document.getElementById("ptzTelemetry").textContent =
+            `PAN: ${data.pan >= 0 ? '+' : ''}${data.pan.toFixed(1)}° | TILT: ${data.tilt >= 0 ? '+' : ''}${data.tilt.toFixed(1)}° | ZOOM: ${data.zoom.toFixed(1)}x`;
+        }
       } catch (err) {}
     } else {
-      // In-browser PTZ emulation
       if (action === "left") activePtzSession.pan -= 5;
       if (action === "right") activePtzSession.pan += 5;
       if (action === "up") activePtzSession.tilt += 5;
@@ -859,7 +938,7 @@ cameraForm.addEventListener("submit", async (e) => {
     const method = camId ? "PUT" : "POST";
     const url = camId ? `/api/cameras/${camId}` : "/api/cameras";
     try {
-      const res = await fetch(url, {
+      const res = await authFetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
@@ -872,7 +951,7 @@ cameraForm.addEventListener("submit", async (e) => {
     } catch (err) {}
   }
 
-  // GitHub Pages Mode: Update LocalStorage
+  // GitHub Pages Mode
   if (camId) {
     const idx = cameras.findIndex(c => c.id === camId);
     if (idx > -1) cameras[idx] = { ...cameras[idx], ...payload };
@@ -890,7 +969,7 @@ async function deleteCamera(camId) {
   if (!confirm("Remove this camera from the matrix?")) return;
   if (localApiAvailable) {
     try {
-      const res = await fetch(`/api/cameras/${camId}`, { method: "DELETE" });
+      const res = await authFetch(`/api/cameras/${camId}`, { method: "DELETE" });
       if (res.ok) {
         await fetchCameras();
         return;
@@ -912,29 +991,21 @@ async function startDiscoveryScan() {
   scanStatusMsg.textContent = "Scanning local subnet for cameras...";
   tbody.innerHTML = `<tr><td colspan="6" class="empty-state">Probing subnet ${subnetBase}.1 to ${subnetBase}.40... Please wait.</td></tr>`;
 
-  // If local Python hub is available, use fast multicast ONVIF probe
   if (localApiAvailable) {
     try {
-      const res = await fetch("/api/discovery/scan");
-      const data = await res.json();
-      renderDiscoveredDevices(data.devices, "ONVIF UDP / Port Scan");
-      scanStatusMsg.textContent = `Scan complete. Found ${data.devices.length} device(s).`;
-      return;
+      const res = await authFetch("/api/discovery/scan");
+      if (res.ok) {
+        const data = await res.json();
+        renderDiscoveredDevices(data.devices, "ONVIF UDP / Port Scan");
+        scanStatusMsg.textContent = `Scan complete. Found ${data.devices.length} device(s).`;
+        return;
+      }
     } catch (e) {}
   }
 
-  // Pure In-Browser Scanner (GitHub Pages Mode)
-  // Probes HTTP ports using image & fetch timing probes
   const detected = [];
-  const probes = [
-    { path: "/favicon.ico", desc: "Web Interface" },
-    { path: "/doc/page/login.asp", desc: "Hikvision Login" },
-    { path: "/web/login.html", desc: "Xiongmai (Chinese Cam)" },
-    { path: "/snapshot.jpg", desc: "Direct Snapshot Cam" }
-  ];
-
   let completed = 0;
-  const totalToScan = 35; // Fast scan first 35 hosts
+  const totalToScan = 35;
 
   for (let i = 1; i <= totalToScan; i++) {
     const ip = `${subnetBase}.${i}`;
@@ -945,7 +1016,6 @@ async function startDiscoveryScan() {
         renderDiscoveredDevices(detected, "Browser LAN Probe");
       }
       if (completed >= totalToScan) {
-        // Always add simulated engine
         detected.push({
           ip: "127.0.0.1",
           type: "Virtual Simulator",
@@ -980,10 +1050,7 @@ function testCameraHostInBrowser(ip) {
       }
     };
 
-    img.onerror = () => {
-      // Image error could still mean the host is active (CORS / HTTP 401 Auth)
-      // If error happens very fast (< 400ms), port is open and rejected!
-    };
+    img.onerror = () => {};
 
     img.src = `http://${ip}/favicon.ico?t=${Date.now()}`;
     setTimeout(() => {
@@ -1039,10 +1106,129 @@ function attachEventListeners() {
     btn.onclick = () => setLayout(btn.dataset.layout);
   });
 
+  // Authentication & Session Handlers
+  btnLoginNav.onclick = () => {
+    loginAlert.classList.add("hidden");
+    loginModal.classList.remove("hidden");
+  };
+
+  document.getElementById("btnCloseLoginModal").onclick = () => loginModal.classList.add("hidden");
+
+  loginForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    loginAlert.classList.add("hidden");
+    const username = document.getElementById("loginUser").value.trim();
+    const password = document.getElementById("loginPass").value;
+
+    if (localApiAvailable) {
+      try {
+        const res = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+        if (res.ok && data.token) {
+          authToken = data.token;
+          sessionStorage.setItem("omnisight_token", authToken);
+          localStorage.setItem("omnisight_token", authToken);
+          updateAuthUI(true, data.username);
+          loginModal.classList.add("hidden");
+          await fetchCameras();
+          return;
+        } else {
+          loginAlert.textContent = data.error || "Authentication failed.";
+          loginAlert.classList.remove("hidden");
+          return;
+        }
+      } catch (err) {
+        loginAlert.textContent = "Network error connecting to NVR hub.";
+        loginAlert.classList.remove("hidden");
+        return;
+      }
+    }
+
+    // Standalone GitHub Pages Passcode Lock
+    if (username === "admin" && (password === "admin123" || password === localStorage.getItem("omnisight_passcode") || !localStorage.getItem("omnisight_passcode"))) {
+      sessionStorage.setItem("omnisight_unlocked", "true");
+      if (password !== "admin123") {
+        localStorage.setItem("omnisight_passcode", password);
+      }
+      updateAuthUI(true, username);
+      loginModal.classList.add("hidden");
+      renderGrid();
+    } else {
+      loginAlert.textContent = "Invalid username or passcode.";
+      loginAlert.classList.remove("hidden");
+    }
+  });
+
+  btnLogoutNav.onclick = async () => {
+    if (localApiAvailable && authToken) {
+      try {
+        await authFetch("/api/auth/logout", { method: "POST" });
+      } catch (e) {}
+    }
+    authToken = "";
+    sessionStorage.removeItem("omnisight_token");
+    localStorage.removeItem("omnisight_token");
+    sessionStorage.removeItem("omnisight_unlocked");
+    updateAuthUI(false);
+    loginModal.classList.remove("hidden");
+  };
+
+  btnChangePassNav.onclick = () => {
+    changePassAlert.classList.add("hidden");
+    changePasswordModal.classList.remove("hidden");
+  };
+
+  document.getElementById("btnCloseChangePassModal").onclick = () => changePasswordModal.classList.add("hidden");
+  document.getElementById("btnCancelChangePass").onclick = () => changePasswordModal.classList.add("hidden");
+
+  changePasswordForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    changePassAlert.classList.add("hidden");
+    const oldPass = document.getElementById("oldPass").value;
+    const newPass = document.getElementById("newPass").value;
+    const confirmPass = document.getElementById("confirmNewPass").value;
+
+    if (newPass !== confirmPass) {
+      changePassAlert.textContent = "New passwords do not match.";
+      changePassAlert.classList.remove("hidden");
+      return;
+    }
+
+    if (localApiAvailable) {
+      try {
+        const res = await authFetch("/api/auth/change-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ old_password: oldPass, new_password: newPass })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          alert("Password updated successfully!");
+          changePasswordModal.classList.add("hidden");
+          changePasswordForm.reset();
+        } else {
+          changePassAlert.textContent = data.error || "Failed to change password.";
+          changePassAlert.classList.remove("hidden");
+        }
+      } catch (err) {
+        changePassAlert.textContent = "Error changing password.";
+        changePassAlert.classList.remove("hidden");
+      }
+    } else {
+      localStorage.setItem("omnisight_passcode", newPass);
+      alert("Passcode updated successfully!");
+      changePasswordModal.classList.add("hidden");
+      changePasswordForm.reset();
+    }
+  });
+
   // Top Nav Modals
   document.getElementById("btnAddCamera").onclick = openAddCameraModal;
   document.getElementById("btnScanNetwork").onclick = () => discoveryModal.classList.remove("hidden");
-  document.getElementById("btnLegacyFix").onclick = () => legacyFixModal.classList.remove("hidden");
   document.getElementById("btnOpenGallery").onclick = () => galleryModal.classList.remove("hidden");
   document.getElementById("btnVendorGuide").onclick = () => vendorGuideModal.classList.remove("hidden");
 
@@ -1065,7 +1251,7 @@ function attachEventListeners() {
 
     if (localApiAvailable) {
       try {
-        const res = await fetch("/api/dvr/import", {
+        const res = await authFetch("/api/dvr/import", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ vendor, channels, ip, port, username, password, label, group })
@@ -1104,7 +1290,7 @@ function attachEventListeners() {
         password: password,
         stream_url: mainUrl,
         ptz: true,
-        is_simulated: true, // Render procedural CCTV visual on GitHub Pages
+        is_simulated: true,
         status: "online",
         fps: 25,
         resolution: "1920x1080"
@@ -1244,7 +1430,6 @@ function attachEventListeners() {
     if (!ip) return alert("Please enter camera IP address.");
     logCtrl(`Initiating hardware reboot for ${ip} via ${vendor.toUpperCase()} protocol...`);
     
-    // Attempt direct CGI / ISAPI reboot trigger
     const rebootUrl = vendor === "hikvision" 
       ? `http://${ip}/ISAPI/System/reboot`
       : `http://${ip}/cgi-bin/hi3510/sysreboot.cgi`;
