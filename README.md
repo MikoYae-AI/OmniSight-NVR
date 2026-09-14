@@ -152,6 +152,49 @@ docker compose up -d
 
 ---
 
+## 🌐 Remote Access & Multi-Network Setup (Connecting From Outside Home)
+
+When you are away from home or connected to a different Wi-Fi network (cellular, work Wi-Fi, etc.), direct local IP addresses (like `192.168.1.x`) are unreachable. Here are the **3 best ways** to access your home OmniSight-NVR hub and cameras remotely:
+
+---
+
+### Option 1: Mesh VPN with Tailscale or WireGuard (⭐ Recommended)
+
+A mesh VPN creates a secure, encrypted peer-to-peer virtual private network between your devices without opening ports on your home router.
+
+1. **Install Tailscale** on the computer/Raspberry Pi running OmniSight-NVR at home, and on your remote phone/laptop.
+2. **Enable Tailscale Subnet Router** (optional) on your home server so you can access your home IP camera subnets directly:
+   ```bash
+   sudo tailscale up --advertise-routes=192.168.1.0/24
+   ```
+3. Connect your remote device to Tailscale. You can now access your OmniSight dashboard using its Tailscale IP (e.g., `http://100.x.y.z:8080`) or local home IP (`192.168.1.x:8080`) as if you were connected to your home Wi-Fi!
+
+---
+
+### Option 2: Cloudflare Tunnel (Zero Trust)
+
+Expose your local OmniSight-NVR dashboard securely to a custom web domain (e.g., `nvr.yourdomain.com`) over HTTPS with SSL and authentication:
+
+1. Install `cloudflared` on your home server running OmniSight-NVR.
+2. Authenticate and create a tunnel pointing to your local OmniSight server (`http://localhost:8080`):
+   ```bash
+   cloudflared tunnel create omnisight
+   cloudflared tunnel run --url http://localhost:8080 omnisight
+   ```
+3. Add Cloudflare Access policies to restrict access to authorized email logins or 2FA.
+
+---
+
+### Option 3: Port Forwarding + Dynamic DNS (DDNS)
+
+Direct router port forwarding allows direct connection to your home public IP:
+
+1. **Configure DDNS**: Use a provider like No-IP or DuckDNS to map your home WAN IP to a hostname (e.g., `myhome.duckdns.org`).
+2. **Port Forwarding**: In your home router settings, forward WAN port `8080` (or a custom high port like `8443`) to your local NVR server IP (`192.168.1.x:8080`).
+3. **Security Precaution**: Ensure OmniSight-NVR session authentication is enabled and use strong passwords when exposing ports directly to the public internet.
+
+---
+
 ## 🛠️ Hardware Transcoding (Optional)
 
 OmniSight includes a built-in simulation and HTTP MJPEG parser that runs with **zero dependencies**.
