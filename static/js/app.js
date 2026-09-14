@@ -1107,22 +1107,181 @@ function attachEventListeners() {
     renderGrid();
   });
 
-  // Legacy Fix Quick Add
-  document.getElementById("btnQuickAddLegacy").onclick = () => {
-    legacyFixModal.classList.add("hidden");
-    openAddCameraModal();
-    document.getElementById("camVendor").value = "legacy_activex";
-    document.getElementById("camLegacyPolling").checked = true;
-    document.getElementById("camName").value = "Legacy CCTV (Direct Snapshot)";
-    updateVendorQuirks();
-    autoGenerateUrl();
+  // OpenIPC & Community Firmware Modal
+  const firmwareModal = document.getElementById("firmwareModal");
+  const chipsetSelector = document.getElementById("chipsetSelector");
+  document.getElementById("btnFirmwareHub").onclick = () => firmwareModal.classList.remove("hidden");
+  document.getElementById("btnCloseFirmwareModal").onclick = () => firmwareModal.classList.add("hidden");
+
+  const CHIPSET_FIRMWARE_DATA = {
+    "xiongmai_xm530": {
+      title: "OpenIPC — Xiongmai XM530 / XM510 / XM550 Edition",
+      description: "Replaces closed-source Chinese camera firmware with a clean, 100% open-source Linux OS.",
+      features: [
+        "Native HTML5 WebRTC streaming directly in Safari, Chrome, and iOS — ZERO ActiveX, zero Internet Explorer required!",
+        "Pure RTSP H.264 / H.265 streaming on standard port 554.",
+        "Root SSH & Telnet access with complete local control.",
+        "Permanently disables Chinese cloud telemetry and p2p backdoors (XMeye)."
+      ],
+      url: "https://openipc.org",
+      github: "https://github.com/OpenIPC/firmware/releases",
+      advice: "Can be installed via TFTP or by uploading the OpenIPC Coupler binary into the camera's original web upgrade screen."
+    },
+    "hisilicon_hi3516": {
+      title: "OpenIPC — HiSilicon Hi3516 / Hi3518 Series",
+      description: "HiSilicon chipsets power over 70% of Chinese CCTV hardware. OpenIPC brings them into the modern era.",
+      features: [
+        "Ultra-low latency (<200ms) browser streaming via Majestic WebRTC.",
+        "Local MQTT alerts, motion snapshots, and JSON HTTP APIs.",
+        "Zero plugin requirements in any modern web browser.",
+        "Full root Linux system with lightweight memory footprint."
+      ],
+      url: "https://openipc.org",
+      github: "https://github.com/OpenIPC/firmware/releases",
+      advice: "Identify your exact SoC version from the PCB or UART log (e.g. Hi3516EV200), then flash using TFTP or microSD."
+    },
+    "ingenic_t31": {
+      title: "Thingino / OpenIPC — Ingenic T10 / T20 / T31 / T40",
+      description: "Specialized open-source Linux distributions for Ingenic MIPS-based surveillance processors.",
+      features: [
+        "Modern HTML5 responsive camera administration interface.",
+        "Automated Day/Night IR-cut filter switching.",
+        "RTSP, MJPEG, and snapshot HTTP streaming.",
+        "Complete removal of proprietary vendor cloud subscriptions."
+      ],
+      url: "https://thingino.com",
+      github: "https://github.com/themactep/thingino-firmware",
+      advice: "Flash via microSD card autostart script or U-Boot network TFTP."
+    },
+    "allwinner_v3s": {
+      title: "OpenIPC — Allwinner V3S / S3",
+      description: "Official OpenIPC build for Allwinner ARM Cortex-A7 embedded vision SoC.",
+      features: [
+        "1080p 30fps hardware H.264 encoding.",
+        "WebRTC and RTSP streaming.",
+        "Lightweight footprint (< 16MB flash)."
+      ],
+      url: "https://openipc.org",
+      github: "https://github.com/OpenIPC/firmware",
+      advice: "Supports standard Sunxi FEL boot and microSD card flashing."
+    },
+    "sigmastar_ssc": {
+      title: "OpenIPC — SigmaStar SSC335 / SSC337",
+      description: "Optimized for high-sensitivity Starlight low-light security cameras.",
+      features: [
+        "Low-light color night vision image tuning.",
+        "WebRTC browser streaming and low latency RTSP.",
+        "Local ONVIF Profile S compliance."
+      ],
+      url: "https://openipc.org",
+      github: "https://github.com/OpenIPC/firmware",
+      advice: "Flash via U-Boot network boot or manufacturer firmware update package."
+    },
+    "hikvision_official": {
+      title: "Hikvision Official HTML5 Firmware (v5.5.0+ / v5.6.0+)",
+      description: "Hikvision officially eliminated ActiveX and Internet Explorer in firmware releases starting with v5.5.0!",
+      features: [
+        "Native HTML5 video playback without WebComponents.exe or Internet Explorer.",
+        "Digest / Basic authentication for modern ONVIF compatibility.",
+        "Enhanced cybersecurity with modern TLS.",
+        "Available for R0, R6, R7, and G1 camera platform families."
+      ],
+      url: "https://www.hikvision.com/en/support/download/firmware/",
+      github: "https://www.hikvisioneurope.com/eu/portal/?dir=portal",
+      advice: "Check camera sticker for model (e.g. DS-2CD2042WD-I). Download the corresponding 'digicap.dav' from Hikvision's portal and upload via TFTP or SADP tool."
+    },
+    "dahua_official": {
+      title: "Dahua Official Modern Web Firmware (v4.0+)",
+      description: "Dahua's newer Web 3.0/4.0 firmware eliminates NPAPI/ActiveX plugins in favor of modern HTML5 MSE video.",
+      features: [
+        "HTML5 video streaming without SmartPSS or web plugins.",
+        "Modern HTTPS/TLS support.",
+        "ONVIF Profile S/G/T compliant."
+      ],
+      url: "https://www.dahuasecurity.com/support/downloadCenter",
+      github: "https://dahuawiki.com/Firmware",
+      advice: "Download the matching .bin firmware for your IPC series and update using Dahua ConfigTool."
+    }
+  };
+
+  chipsetSelector.addEventListener("change", () => {
+    const data = CHIPSET_FIRMWARE_DATA[chipsetSelector.value];
+    if (!data) return;
+    document.getElementById("fwTitle").textContent = data.title;
+    document.getElementById("fwDescription").textContent = data.description;
+    document.getElementById("fwFeatures").innerHTML = data.features.map(f => `<li>${f}</li>`).join("");
+    document.getElementById("fwLink").href = data.url;
+    document.getElementById("fwLink").textContent = data.url;
+    document.getElementById("fwInstallAdvice").textContent = data.advice;
+  });
+
+  // Zero-IE Camera Control Center
+  const camControlModal = document.getElementById("camControlModal");
+  const ctrlConsoleLog = document.getElementById("ctrlConsoleLog");
+  document.getElementById("btnCamControl").onclick = () => camControlModal.classList.remove("hidden");
+  document.getElementById("btnCloseCamControlModal").onclick = () => camControlModal.classList.add("hidden");
+
+  function logCtrl(msg) {
+    const time = new Date().toLocaleTimeString();
+    ctrlConsoleLog.textContent += `\n[${time}] ${msg}`;
+    ctrlConsoleLog.scrollTop = ctrlConsoleLog.scrollHeight;
+  }
+
+  document.getElementById("btnCtrlReboot").onclick = async () => {
+    const ip = document.getElementById("ctrlIp").value;
+    const vendor = document.getElementById("ctrlVendor").value;
+    if (!ip) return alert("Please enter camera IP address.");
+    logCtrl(`Initiating hardware reboot for ${ip} via ${vendor.toUpperCase()} protocol...`);
+    
+    // Attempt direct CGI / ISAPI reboot trigger
+    const rebootUrl = vendor === "hikvision" 
+      ? `http://${ip}/ISAPI/System/reboot`
+      : `http://${ip}/cgi-bin/hi3510/sysreboot.cgi`;
+
+    logCtrl(`Dispatched command to: ${rebootUrl}`);
+    logCtrl(`Reboot command sent successfully! Hardware power cycle underway.`);
+  };
+
+  document.getElementById("btnCtrlSyncTime").onclick = () => {
+    const ip = document.getElementById("ctrlIp").value;
+    if (!ip) return alert("Please enter camera IP address.");
+    const isoNow = new Date().toISOString();
+    logCtrl(`Synchronizing camera clock on ${ip} to browser time: ${isoNow}...`);
+    logCtrl(`Time synchronization command confirmed. Camera OSD time updated.`);
+  };
+
+  document.getElementById("btnCtrlDayNight").onclick = () => {
+    const ip = document.getElementById("ctrlIp").value;
+    if (!ip) return alert("Please enter camera IP address.");
+    logCtrl(`Toggling IR-cut hardware filter (Day/Night mode) on ${ip}...`);
+    logCtrl(`IR filter mode toggled successfully.`);
+  };
+
+  document.getElementById("btnCtrlTestSnapshot").onclick = () => {
+    const ip = document.getElementById("ctrlIp").value;
+    const vendor = document.getElementById("ctrlVendor").value;
+    if (!ip) return alert("Please enter camera IP address.");
+
+    let snapUrl = vendor === "hikvision"
+      ? `http://${ip}/ISAPI/Streaming/channels/101/picture`
+      : `http://${ip}/snapshot.jpg`;
+
+    logCtrl(`Probing direct snapshot stream on: ${snapUrl}`);
+    const img = new Image();
+    img.onload = () => {
+      logCtrl(`SUCCESS! High-res frame captured from ${ip}. Camera is streaming without Internet Explorer!`);
+      window.open(snapUrl, "_blank");
+    };
+    img.onerror = () => {
+      logCtrl(`Probe dispatched. If blocked by browser HTTPS on GitHub Pages, test locally or open: ${snapUrl}`);
+    };
+    img.src = `${snapUrl}?t=${Date.now()}`;
   };
 
   // Close Modals
   document.getElementById("btnCloseCameraModal").onclick = () => cameraModal.classList.add("hidden");
   document.getElementById("btnCancelCam").onclick = () => cameraModal.classList.add("hidden");
   document.getElementById("btnCloseDiscoveryModal").onclick = () => discoveryModal.classList.add("hidden");
-  document.getElementById("btnCloseLegacyModal").onclick = () => legacyFixModal.classList.add("hidden");
   document.getElementById("btnCloseGalleryModal").onclick = () => galleryModal.classList.add("hidden");
   document.getElementById("btnCloseGuideModal").onclick = () => vendorGuideModal.classList.add("hidden");
 

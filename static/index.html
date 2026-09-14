@@ -44,22 +44,25 @@
         <!-- Action Buttons -->
         <div class="action-buttons">
           <button class="btn-action btn-primary" id="btnAddCamera">
-            <span class="icon">+</span> ADD CAMERA
+            <span class="icon">+</span> Add Camera
           </button>
           <button class="btn-action btn-secondary" id="btnImportDvr">
-            <span class="icon">📼</span> IMPORT DVR
+            <span class="icon">📼</span> Import DVR
           </button>
           <button class="btn-action btn-secondary" id="btnScanNetwork">
-            <span class="icon">⚡</span> DISCOVERY
+            <span class="icon">⚡</span> Discovery
           </button>
-          <button class="btn-action btn-warning" id="btnLegacyFix" title="Fix cameras requiring Internet Explorer or old ActiveX firmware">
-            <span class="icon">🛡️</span> OLD CAM / IE FIX
+          <button class="btn-action btn-secondary" id="btnFirmwareHub" title="OpenIPC community firmware & official updates">
+            <span class="icon"></span> OpenIPC &amp; Firmware
+          </button>
+          <button class="btn-action btn-warning" id="btnCamControl" title="Control camera hardware directly with zero Internet Explorer or Edge">
+            <span class="icon">⚙️</span> Zero-IE Control
           </button>
           <button class="btn-action btn-secondary" id="btnOpenGallery">
-            <span class="icon">📷</span> GALLERY
+            <span class="icon">📷</span> Gallery
           </button>
           <button class="btn-action btn-ghost" id="btnVendorGuide">
-            <span class="icon">📖</span> CHEATSHEET
+            <span class="icon">📖</span> Guide
           </button>
         </div>
       </div>
@@ -279,63 +282,116 @@
     </div>
   </div>
 
-  <!-- MODAL: Legacy Camera & Internet Explorer ActiveX Fixer -->
-  <div class="modal-overlay hidden" id="legacyFixModal">
+  <!-- MODAL: OpenIPC & Community Firmware Hub -->
+  <div class="modal-overlay hidden" id="firmwareModal">
     <div class="modal-dialog modal-large">
       <div class="modal-header">
-        <h3>🛡️ Legacy Camera & Internet Explorer ActiveX Fixer</h3>
-        <button class="btn-close" id="btnCloseLegacyModal">&times;</button>
+        <h3> Community Firmware &amp; OpenIPC Directory</h3>
+        <button class="btn-close" id="btnCloseFirmwareModal">&times;</button>
       </div>
       <div class="modal-body guide-content">
         <p class="section-desc">
-          Do you have older Hikvision (firmware &lt; v5.5) or unbranded Chinese cameras that throw 
-          <em>"Please use 32-bit Internet Explorer"</em> or <em>"Install WebComponents / ActiveX plugin"</em>?
-          Here is how OmniSight frees you from Internet Explorer forever:
+          Free your cameras from abandoned vendor firmware, Chinese cloud backdoors, and broken ActiveX plugins. 
+          Install community-driven open-source Linux firmware directly on your hardware.
         </p>
 
-        <div class="guide-grid">
-          <div class="guide-card">
-            <h4>Method 1: Direct HTML5 Snapshot Polling (Zero ActiveX Needed)</h4>
-            <p>Older cameras only enforce ActiveX for their browser GUI. Under the hood, their raw snapshot and MJPEG endpoints can be viewed in <strong>any modern browser</strong>!</p>
-            <p><strong>Hikvision Snapshot URL:</strong> <code>http://[user]:[pass]@[ip]/ISAPI/Streaming/channels/101/picture</code></p>
-            <p><strong>Chinese XM / NetSurveillance:</strong> <code>http://[user]:[pass]@[ip]/snapshot.jpg</code></p>
-            <p><strong>Dahua Legacy:</strong> <code>http://[user]:[pass]@[ip]/cgi-bin/snapshot.cgi?channel=1</code></p>
-            <button class="btn-action btn-primary" id="btnQuickAddLegacy" style="margin-top: 10px;">
-              + Add Legacy Snapshot Camera
-            </button>
-          </div>
+        <div class="form-group" style="margin-bottom: 8px;">
+          <label for="chipsetSelector">Select Your Camera's Processor / Chipset (SoC):</label>
+          <select id="chipsetSelector" style="width: 100%; max-width: 480px;">
+            <option value="xiongmai_xm530">Xiongmai XM530 / XM510 / XM550 (Generic Chinese Cams / NetSurveillance)</option>
+            <option value="hisilicon_hi3516">HiSilicon Hi3516 / Hi3518 (The #1 Most Common OEM CCTV Chipset)</option>
+            <option value="ingenic_t31">Ingenic T10 / T20 / T30 / T31 / T40 (Yi, Wyze, Tapo, MStar)</option>
+            <option value="allwinner_v3s">Allwinner V3S / S3 (Open Source Board Cameras)</option>
+            <option value="sigmastar_ssc">SigmaStar SSC335 / SSC337 (Starlight Night Vision Cameras)</option>
+            <option value="hikvision_official">Hikvision DS-2CD / ColorVu (Official HTML5 Upgrade)</option>
+            <option value="dahua_official">Dahua IPC / WizSense (Official HTML5 Upgrade)</option>
+          </select>
+        </div>
 
-          <div class="guide-card">
-            <h4>Method 2: Microsoft Edge "Internet Explorer Mode"</h4>
-            <p>If you need to change hardware settings (IP, date, admin pass) on an ancient camera that strictly requires ActiveX:</p>
-            <ol style="padding-left: 18px; font-size: 11px; color: var(--text-main); margin-top: 6px;">
-              <li>Open <strong>Microsoft Edge</strong>.</li>
-              <li>Go to <code>edge://settings/defaultBrowser</code>.</li>
-              <li>Turn <strong>"Allow sites to be reloaded in Internet Explorer mode"</strong> to <strong>Allow</strong>.</li>
-              <li>Add your camera's IP (e.g. <code>http://192.168.1.64</code>) to the <em>IE Mode Pages</em> list.</li>
-              <li>Restart Edge — the camera's original ActiveX setup will load!</li>
-            </ol>
-          </div>
-
-          <div class="guide-card">
-            <h4>Method 3: Portable Legacy Browsers (Linux &amp; Modern PC)</h4>
-            <p>If you run Linux (Arch, Mint, Ubuntu) and have no Internet Explorer:</p>
-            <ul style="padding-left: 18px; font-size: 11px; color: var(--text-main); margin-top: 6px;">
-              <li>Use <strong>Supermium</strong> or <strong>Pale Moon (32-bit)</strong> with NPAPI plugin support.</li>
-              <li>Or run the camera's CMS software via Wine: <code>wine General_CMS.exe</code>.</li>
-              <li>Or simply run OmniSight locally with <code>./start.sh</code> to tap the RTSP feed directly.</li>
+        <div class="guide-card" id="firmwareResultCard" style="background: rgba(10, 132, 255, 0.08); border-color: rgba(10, 132, 255, 0.3);">
+          <!-- Dynamically populated by JS -->
+          <h4 id="fwTitle" style="color: var(--apple-blue); font-size: 15px;">OpenIPC — The Open Source CCTV OS</h4>
+          <p id="fwDescription">OpenIPC replaces closed-source Chinese camera firmware with a clean, open Linux distribution.</p>
+          <div style="margin: 10px 0;">
+            <strong>Features:</strong>
+            <ul id="fwFeatures" style="padding-left: 20px; font-size: 11px; margin-top: 4px; color: var(--text-primary);">
+              <li>Native HTML5 video streaming with WebRTC (plays in Safari, Chrome, iOS with ZERO plugins).</li>
+              <li>Pure RTSP H.264 / H.265 server running on port 554.</li>
+              <li>Root SSH &amp; Telnet shell access with complete privacy (no telemetry to Chinese cloud servers).</li>
+              <li>ONVIF Profile S compliance built-in.</li>
             </ul>
           </div>
-
-          <div class="guide-card">
-            <h4>Method 4: Bypass Mixed Content on GitHub Pages</h4>
-            <p>Because GitHub Pages uses <code>https://</code>, modern browsers block direct HTTP requests to local IPs (e.g. <code>http://192.168.1.x</code>).</p>
-            <p><strong>To bypass:</strong></p>
-            <ul style="padding-left: 18px; font-size: 11px; color: var(--text-main); margin-top: 6px;">
-              <li>Click the padlock icon in your browser URL bar &gt; <em>Site Settings</em> &gt; Set <strong>Insecure content</strong> to <strong>Allow</strong>.</li>
-              <li>Or run the local OmniSight hub: <code>./start.sh 8080</code> for zero CORS/SSL friction.</li>
-            </ul>
+          <p><strong>Official Repository &amp; Binaries:</strong> <a href="https://openipc.org" target="_blank" id="fwLink" style="color: var(--apple-cyan); text-decoration: underline;">https://openipc.org</a></p>
+          <p><strong>GitHub Releases:</strong> <a href="https://github.com/OpenIPC/firmware/releases" target="_blank" style="color: var(--apple-cyan); text-decoration: underline;">OpenIPC on GitHub</a></p>
+          <div style="margin-top: 10px; padding: 8px 12px; background: rgba(0,0,0,0.3); border-radius: 6px;">
+            <span style="font-size: 11px; font-weight: 600; color: var(--apple-orange);">Installation Advice:</span>
+            <p id="fwInstallAdvice" style="font-size: 11px; margin-top: 2px;">
+              Can be flashed via microSD card, TFTP recovery, or the camera's web upgrade page using Coupler firmware.
+            </p>
           </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Zero-IE Direct Camera Controller -->
+  <div class="modal-overlay hidden" id="camControlModal">
+    <div class="modal-dialog modal-large">
+      <div class="modal-header">
+        <h3>⚙️ Zero-IE Camera Control Center</h3>
+        <button class="btn-close" id="btnCloseCamControlModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="section-desc">
+          No Microsoft Edge. No Internet Explorer. No ActiveX. Control your camera's hardware parameters directly 
+          via native HTTP ISAPI and CGI commands from your modern browser.
+        </p>
+
+        <div class="form-row">
+          <div class="form-group flex-2">
+            <label for="ctrlIp">Target Camera IP</label>
+            <input type="text" id="ctrlIp" placeholder="192.168.1.100">
+          </div>
+          <div class="form-group flex-1">
+            <label for="ctrlVendor">Architecture</label>
+            <select id="ctrlVendor">
+              <option value="hikvision">Hikvision ISAPI</option>
+              <option value="xiongmai">Xiongmai (Chinese Cam CGI)</option>
+              <option value="dahua">Dahua CGI</option>
+              <option value="generic_onvif">ONVIF Service</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label for="ctrlUser">Username</label>
+            <input type="text" id="ctrlUser" value="admin">
+          </div>
+          <div class="form-group flex-1">
+            <label for="ctrlPass">Password</label>
+            <input type="password" id="ctrlPass" placeholder="••••••••">
+          </div>
+        </div>
+
+        <div class="action-buttons" style="flex-wrap: wrap; margin-top: 8px;">
+          <button type="button" class="btn-action btn-primary" id="btnCtrlReboot">
+            <span class="icon">🔄</span> Reboot Camera
+          </button>
+          <button type="button" class="btn-action btn-secondary" id="btnCtrlSyncTime">
+            <span class="icon">⏱️</span> Sync Clock
+          </button>
+          <button type="button" class="btn-action btn-secondary" id="btnCtrlDayNight">
+            <span class="icon">🌙</span> Toggle Day/Night IR
+          </button>
+          <button type="button" class="btn-action btn-secondary" id="btnCtrlTestSnapshot">
+            <span class="icon">📸</span> Test Snapshot Stream
+          </button>
+        </div>
+
+        <div class="form-group" style="margin-top: 10px;">
+          <label>Command Execution Console</label>
+          <pre id="ctrlConsoleLog" style="background: rgba(0,0,0,0.6); padding: 12px; border-radius: 8px; font-family: var(--font-mono); font-size: 11px; color: var(--apple-green); min-height: 100px; max-height: 160px; overflow-y: auto;">[Ready] Target camera configured. Select an action above to execute direct HTTP command...</pre>
         </div>
       </div>
     </div>

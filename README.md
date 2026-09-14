@@ -1,34 +1,36 @@
 # ✦ OmniSight-NVR
 
 > **The Universal Multi-Vendor CCTV & IP Camera Surveillance Hub**  
-> *Unifying Hikvision DVRs, Dahua XVRs, Xiongmai Chinese CCTV boxes, analog BNC cameras, and ONVIF streams under one high-performance web dashboard.*
+> *Crafted with an Apple-grade Cupertino frosted-glass aesthetic. Unifying Hikvision DVRs, Dahua XVRs, Xiongmai Chinese CCTV boxes, analog BNC cameras, and ONVIF streams under one web dashboard.*
+
+🌐 **Live GitHub Pages Web App:** [https://mikoyae-ai.github.io/OmniSight-NVR/](https://mikoyae-ai.github.io/OmniSight-NVR/)
 
 ---
 
 ## 👁️ The Problem OmniSight Solves
 
-Whether you are running **analog CCTV cameras** wired via coaxial BNC cables into a DVR box or modern **IP surveillance cameras**:
+Whether you are running **analog CCTV cameras** wired via coaxial BNC cables into a DVR box or older **IP surveillance cameras**:
 - **Hikvision CCTV DVRs / TurboHD** demand *iVMS-4200* or *Hik-Connect*.
 - **Dahua XVR / DVRs** demand *SmartPSS* or *DMSS*.
 - **Generic Chinese CCTV DVRs & Cameras** (Xiongmai / HiSilicon / Sofia chipsets) force you to use outdated Windows *CMS* software, sketchy cloud apps (*XMeye*, *V380*, *Yoosee*), or broken Internet Explorer ActiveX plugins.
-- **Consumer Wi-Fi Cams** (Tapo, Reolink) trap you inside mobile phone apps.
+- **Abandoned Camera Firmware**: Millions of older cameras refuse to load in Chrome or Firefox, demanding 32-bit Internet Explorer.
 
-**OmniSight-NVR** destroys vendor lock-in. Whether your CCTV cameras are analog BNC lines hooked into a DVR or standalone network cameras, OmniSight bridges every channel into a single, unified web console.
+**OmniSight-NVR** completely eliminates Internet Explorer, Microsoft Edge, and vendor bloatware. It features an Apple-inspired frosted glass interface, community-driven **OpenIPC** firmware integration, and direct hardware control without plugins.
 
 ---
 
 ## ⚡ Key Highlights
 
+- ** Apple Cupertino Aesthetic**: Designed with San Francisco typography, frosted glassmorphism (`backdrop-filter: blur(28px)`), refined segmented matrix controls, and Apple Home-inspired camera cards.
+- ** OpenIPC Community Firmware Directory**: Direct firmware discovery and guides for **OpenIPC** (openipc.org) and **Thingino**. Replace closed-source Chinese camera firmware on HiSilicon, Xiongmai XM530, Ingenic T31, and SigmaStar chips with 100% open-source Linux, WebRTC video, and root SSH.
+- **⚙️ Zero-IE / Zero-Edge Direct Camera Control**: Change hardware parameters (reboot, day/night IR-cut filter, time sync, OSD rename) directly via native HTTP ISAPI & CGI commands without ever launching Microsoft Edge or Internet Explorer.
 - **CCTV DVR Multi-Channel Bulk Importer**: Have an 8-channel or 16-channel Hikvision or Chinese CCTV DVR box? Enter the DVR IP and provision all BNC coaxial camera channels into your web matrix simultaneously in seconds!
-- **Universal Protocol Ingestion**: RTSP streams, ONVIF Profile S, HTTP/MJPEG, USB/V4L2 capture dongles, and virtual test streams.
-- **CCTV BNC Channel Mapping**: Pre-configured channel schemes for Hikvision TurboHD (`/Streaming/Channels/101`, `201`, `301`), Chinese AHD/TVI DVRs (`/live/ch0`, `/live/ch1`), and Dahua XVRs (`channel=1`, `channel=2`).
-- **Built-in ONVIF & LAN Scanner**: One-click network scanner using WS-Discovery (UDP 3702) and signature port probing (554, 34567, 37777, 8000, 8899) to detect and identify camera chipsets automatically.
-- **Vendor Presets Database**: Automated connection string generation for Hikvision, Dahua, Xiongmai, Tapo, Reolink, V380, Yoosee, Uniview, and Axis.
+- **In-Browser LAN Subnet Scanner**: Runs directly on GitHub Pages using browser-native probes to discover active cameras on your home network without any backend!
+- **Universal Protocol Ingestion**: RTSP streams, ONVIF Profile S, direct HTML5 snapshot polling, HTTP/MJPEG, and procedural CCTV test streams.
 - **Ultra-Lean Zero-Dependency Core**: The backend runs purely on vanilla Python 3 standard library and Pillow.
-- **Responsive Surveillance Matrix**: Dynamic grid layouts (1×1 focus, 2×2 quad, 3×3, 4×4) with dark gothic cybersecurity aesthetics.
-- **Virtual PTZ Joypad**: On-screen pan, tilt, and zoom controls.
+- **Responsive Surveillance Matrix**: Dynamic grid layouts (1×1 focus, 2×2 quad, 3×3, 4×4).
+- **Virtual PTZ Joypad**: Tactile pan, tilt, and zoom controls.
 - **Instant Snapshot Capture**: High-speed still capture with built-in gallery and timestamped archive.
-- **Out-of-the-Box Simulation**: Ships with procedural surveillance streams so you can test immediately without physical hardware.
 
 ---
 
