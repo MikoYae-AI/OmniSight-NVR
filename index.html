@@ -64,6 +64,18 @@
           <button class="btn-action btn-ghost" id="btnVendorGuide">
             <span class="icon">📖</span> Guide
           </button>
+          <button class="btn-action btn-ghost" id="btnLoginNav">
+            <span class="icon">🔐</span> Login
+          </button>
+          <div class="user-menu hidden" id="userMenu" style="display: flex; gap: 8px; align-items: center;">
+            <span id="currentUserDisplay" class="mode-badge">👤 Guest</span>
+            <button class="btn-action btn-ghost" id="btnChangePassNav" title="Change Passcode">
+              <span class="icon">🔑</span>
+            </button>
+            <button class="btn-action btn-ghost" id="btnLogoutNav" title="Logout">
+              <span class="icon">🚪</span>
+            </button>
+          </div>
         </div>
       </div>
     </header>
@@ -99,6 +111,59 @@
         <span class="quote">"Right here, right now... every camera brought into obedience."</span>
       </div>
     </footer>
+  </div>
+
+  <!-- MODAL: Login -->
+  <div class="modal-overlay hidden" id="loginModal">
+    <div class="modal-dialog" style="max-width: 400px;">
+      <div class="modal-header">
+        <h3>System Authentication</h3>
+        <button class="btn-close" id="btnCloseLoginModal">&times;</button>
+      </div>
+      <form id="loginForm" class="modal-body">
+        <div id="loginAlert" class="alert-error hidden" style="color: #ff3b30; margin-bottom: 10px; font-size: 13px;"></div>
+        <div class="form-group">
+          <label for="loginUser">Username</label>
+          <input type="text" id="loginUser" required value="admin">
+        </div>
+        <div class="form-group">
+          <label for="loginPass">Password / Passcode</label>
+          <input type="password" id="loginPass" required placeholder="••••••••">
+        </div>
+        <div class="modal-footer" style="margin-top: 20px;">
+          <button type="submit" class="btn-action btn-primary" style="width: 100%;">Authenticate</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Change Password -->
+  <div class="modal-overlay hidden" id="changePasswordModal">
+    <div class="modal-dialog" style="max-width: 400px;">
+      <div class="modal-header">
+        <h3>Update Credentials</h3>
+        <button class="btn-close" id="btnCloseChangePassModal">&times;</button>
+      </div>
+      <form id="changePasswordForm" class="modal-body">
+        <div id="changePassAlert" class="alert-error hidden" style="color: #ff3b30; margin-bottom: 10px; font-size: 13px;"></div>
+        <div class="form-group">
+          <label for="oldPass">Current Password</label>
+          <input type="password" id="oldPass" required>
+        </div>
+        <div class="form-group">
+          <label for="newPass">New Password</label>
+          <input type="password" id="newPass" required>
+        </div>
+        <div class="form-group">
+          <label for="confirmNewPass">Confirm New Password</label>
+          <input type="password" id="confirmNewPass" required>
+        </div>
+        <div class="modal-footer" style="margin-top: 20px;">
+          <button type="button" class="btn-action btn-ghost" id="btnCancelChangePass">Cancel</button>
+          <button type="submit" class="btn-action btn-primary">Update Password</button>
+        </div>
+      </form>
+    </div>
   </div>
 
   <!-- MODAL: Add / Edit Camera -->
