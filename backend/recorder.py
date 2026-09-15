@@ -80,3 +80,93 @@ class RecorderManager:
             except Exception:
                 return False
         return False
+
+    def get_timeline_events(self, camera_id: str, date_str: str = "") -> List[Dict[str, Any]]:
+        """Returns 24-hour color-coded event markers (continuous, motion, alarm) for the scrubber."""
+        if not date_str:
+            date_str = time.strftime("%Y-%m-%d")
+
+        # Deterministic event pattern based on camera and date hash
+        seed = sum(ord(c) for c in (camera_id + date_str))
+        events = []
+
+        # 1. Continuous recording background spans
+        continuous_blocks = [
+            (0, 21600, "00:00 - 06:00 Midnight Shift"),
+            (21600, 43200, "06:00 - 12:00 Morning Continuous"),
+            (43200, 64800, "12:00 - 18:00 Afternoon Continuous"),
+            (64800, 86400, "18:00 - 24:00 Evening Continuous")
+        ]
+        for start_s, end_s, lbl in continuous_blocks:
+            dur = end_s - start_s
+            events.append({
+                "id": f"cont-{camera_id}-{start_s}",
+                "type": "continuous",
+                "label": lbl,
+                "color": "rgba(52, 199, 89, 0.4)",
+                "start_time": start_s,
+                "end_time": end_s,
+                "duration": dur,
+                "start_pct": round((start_s / 86400.0) * 100, 2),
+                "width_pct": round((dur / 86400.0) * 100, 2),
+                "start_str": f"{start_s//3600:02d}:{(start_s%3600)//60:02d}:00",
+                "end_str": f"{end_s//3600:02d}:{(end_s%3600)//60:02d}:00"
+            })
+
+        # 2. Motion Events
+        motion_offsets = [3600 + (seed % 1800), 14400 + ((seed * 2) % 2400), 28800 + ((seed * 3) % 3600),
+                          43200 + ((seed * 4) % 1800), 57600 + ((seed * 5) % 2400), 75600 + ((seed * 6) % 1800)]
+        for i, start_s in enumerate(motion_offsets):
+            dur = 600 + ((seed + i * 137) % 600)  # 10 to 20 minutes
+            end_s = min(86400, start_s + dur)
+            events.append({
+                "id": f"mot-{camera_id}-{start_s}",
+                "type": "motion",
+                "label": f"Motion Trigger #{i+1}",
+                "color": "rgba(255, 149, 0, 0.65)",
+                "start_time": start_s,
+                "end_time": end_s,
+                "duration": dur,
+                "start_pct": round((start_s / 86400.0) * 100, 2),
+                "width_pct": max(0.5, round((dur / 86400.0) * 100, 2)),
+                "start_str": f"{start_s//3600:02d}:{(start_s%3600)//60:02d}:00",
+                "end_str": f"{end_s//3600:02d}:{(end_s%3600)//60:02d}:00"
+            })
+
+        # 3. Humanoid / Perimeter Alarms
+        alarm_offsets = [9000 + (seed % 3600), 50400 + ((seed * 7) % 3600), 81000 + ((seed * 11) % 1800)]
+        for j, start_s in enumerate(alarm_offsets):
+            dur = 300 + ((seed + j * 97) % 300)   # 5 to 10 minutes
+            end_s = min(86400, start_s + dur)
+            events.append({
+                "id": f"alarm-{camera_id}-{start_s}",
+                "type": "alarm",
+                "label": f"Humanoid Perimeter Alarm #{j+1}",
+                "color": "rgba(255, 59, 48, 0.8)",
+                "start_time": start_s,
+                "end_time": end_s,
+                "duration": dur,
+                "start_pct": round((start_s / 86400.0) * 100, 2),
+                "width_pct": max(0.6, round((dur / 86400.0) * 100, 2)),
+                "start_str": f"{start_s//3600:02d}:{(start_s%3600)//60:02d}:00",
+                "end_str": f"{end_s//3600:02d}:{(end_s%3600)//60:02d}:00"
+            })
+
+        events.sort(key=lambda x: x["start_time"])
+        return events
+
+    def get_playback_frame(self, camera_id: str, timestamp_or_seconds: float) -> Optional[bytes]:
+        """Fetches or reconstructs historical surveillance frame at specified time."""
+        session = self.stream_manager.get_session(camera_id)
+        if session and hasattr(session, "generate_playback_frame"):
+            return session.generate_playback_frame(timestamp_or_seconds)
+        if session:
+            return session.get_latest_frame()
+        # Fallback procedural playback frame if session is initializing
+        try:
+            from .stream_proxy import CameraStreamSession
+        except (ImportError, ValueError):
+            from stream_proxy import CameraStreamSession
+        temp_session = CameraStreamSession({"id": camera_id, "name": f"Camera {camera_id}"})
+        return temp_session.generate_playback_frame(timestamp_or_seconds)
+

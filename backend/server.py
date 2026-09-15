@@ -331,8 +331,8 @@ class OmniSightHandler(BaseHTTPRequestHandler):
             })
             return
 
-        # API: Get single camera
-        if path.startswith("/api/cameras/") and not path.endswith("/stream") and not path.endswith("/snapshot") and not path.endswith("/ptz"):
+        # API: Get single camera (/api/cameras/<id>)
+        if path.startswith("/api/cameras/") and path.count("/") == 3:
             cam_id = path.split("/")[3]
             cam = config_manager.get_camera(cam_id)
             if cam:
@@ -366,6 +366,35 @@ class OmniSightHandler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
             self.end_headers()
             self.wfile.write(frame)
+            return
+
+        # API: 24-Hour Timeline Events
+        if path.startswith("/api/cameras/") and path.endswith("/timeline"):
+            cam_id = path.split("/")[3]
+            date_param = query.get("date", [""])[0]
+            events = recorder_manager.get_timeline_events(cam_id, date_param)
+            self.send_json(events)
+            return
+
+        # API: Historical Playback Frame
+        if path.startswith("/api/cameras/") and path.endswith("/playback"):
+            cam_id = path.split("/")[3]
+            try:
+                time_val = float(query.get("time", ["0"])[0])
+            except (ValueError, TypeError):
+                time_val = 0.0
+            frame = recorder_manager.get_playback_frame(cam_id, time_val)
+            if frame:
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Content-Length", str(len(frame)))
+                self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+                self.send_header("Pragma", "no-cache")
+                self.send_header("Expires", "0")
+                self.end_headers()
+                self.wfile.write(frame)
+            else:
+                self.send_json({"error": "Failed to render playback frame"}, 500)
             return
 
         # API: Get Presets
@@ -605,11 +634,12 @@ class OmniSightHandler(BaseHTTPRequestHandler):
                 "night_vision": getattr(session, "night_vision", "auto"),
                 "siren_active": getattr(session, "siren_active", False),
                 "intercom_active": getattr(session, "intercom_active", False),
+                "auto_tracking": getattr(session, "auto_tracking", False),
                 "presets": getattr(session, "presets", {})
             })
             return
 
-        # API: V380 Pro / V360 Pro Smart Controls (Night Vision, Siren, Intercom, Presets)
+        # API: V380 Pro / V360 Pro Smart Controls (Night Vision, Siren, Intercom, Presets, Auto-Tracking)
         if path.startswith("/api/cameras/") and path.endswith("/control"):
             cam_id = path.split("/")[3]
             session = stream_manager.get_session(cam_id)
@@ -625,6 +655,8 @@ class OmniSightHandler(BaseHTTPRequestHandler):
                 session.trigger_siren(duration=float(body_data.get("duration", 3.0)))
             elif ctrl_type == "intercom":
                 session.set_intercom(bool(val))
+            elif ctrl_type == "auto_tracking":
+                session.set_auto_tracking(bool(val))
             elif ctrl_type == "save_preset":
                 session.save_preset(int(val))
             elif ctrl_type == "goto_preset":
@@ -636,11 +668,32 @@ class OmniSightHandler(BaseHTTPRequestHandler):
                 "night_vision": session.night_vision,
                 "siren_active": session.siren_active,
                 "intercom_active": session.intercom_active,
+                "auto_tracking": session.auto_tracking,
                 "pan": session.pan,
                 "tilt": session.tilt,
                 "zoom": session.zoom,
                 "presets": session.presets
             })
+            return
+
+        # API: V380 / V360 Pro Intercom Microphone Audio Streaming (Talkback)
+        if path.startswith("/api/cameras/") and path.endswith("/talk"):
+            cam_id = path.split("/")[3]
+            session = stream_manager.get_session(cam_id)
+            if not session:
+                self.send_json({"error": "Camera not found"}, 404)
+                return
+            audio_base64 = body_data.get("audio_base64", "")
+            audio_fmt = body_data.get("format", "webm")
+            audio_bytes = b""
+            if audio_base64:
+                import base64
+                try:
+                    audio_bytes = base64.b64decode(audio_base64)
+                except Exception:
+                    audio_bytes = b""
+            res = session.receive_audio_chunk(audio_bytes, audio_fmt)
+            self.send_json(res)
             return
 
         # API: Capture and save snapshot

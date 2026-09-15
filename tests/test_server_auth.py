@@ -17,9 +17,12 @@ class TestServerAuthEndpoints(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        cls._orig_config = server_mod.config_manager
+        cls._orig_stream = server_mod.stream_manager
         cls.tmp_dir = tempfile.TemporaryDirectory()
         cls.config_path = os.path.join(cls.tmp_dir.name, "test_cameras.json")
         server_mod.config_manager = ConfigManager(config_path=cls.config_path)
+        server_mod.stream_manager = server_mod.StreamManager(server_mod.config_manager)
         cls.port = 8898
         cls.server = server_mod.ThreadingHTTPServer(("127.0.0.1", cls.port), server_mod.OmniSightHandler)
         cls.server_thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
@@ -27,6 +30,8 @@ class TestServerAuthEndpoints(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        server_mod.config_manager = cls._orig_config
+        server_mod.stream_manager = cls._orig_stream
         cls.server.shutdown()
         cls.tmp_dir.cleanup()
 

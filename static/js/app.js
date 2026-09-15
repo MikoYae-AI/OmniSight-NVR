@@ -1196,8 +1196,9 @@ function flashScreen() {
 // PTZ Controller
 function openPtz(camId, camName) {
   activePtzCamId = camId;
-  document.getElementById("ptzCamTitle").textContent = `PTZ: ${camName}`;
+  document.getElementById("ptzCamTitle").textContent = `V380 / V360 Pro: ${camName}`;
   ptzPanel.classList.remove("hidden");
+  loadTimelineEvents(camId);
 }
 
 document.querySelectorAll(".ptz-btn").forEach(btn => {
@@ -1233,11 +1234,58 @@ document.querySelectorAll(".ptz-btn").forEach(btn => {
 });
 
 document.getElementById("btnClosePtz").onclick = () => {
+  if (isPlaybackMode) returnToLive();
   ptzPanel.classList.add("hidden");
   activePtzCamId = null;
 };
 
-// V380 Pro / V360 Pro Smart Controls
+// Autonomous OpenCV PTZ Auto-Tracking
+let isAutoTracking = false;
+const btnAutoTrack = document.getElementById("btnAutoTrack");
+const autoTrackBadge = document.getElementById("autoTrackBadge");
+
+if (btnAutoTrack) {
+  btnAutoTrack.addEventListener("click", async () => {
+    if (!activePtzCamId) return;
+    isAutoTracking = !isAutoTracking;
+    updateAutoTrackUI(isAutoTracking);
+
+    if (localApiAvailable) {
+      try {
+        await authFetch(`/api/cameras/${activePtzCamId}/control`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "auto_tracking", value: isAutoTracking })
+        });
+      } catch (e) {}
+    }
+    showNotification(
+      isAutoTracking ? "🎯 Autonomous PTZ Auto-Tracking Activated" : "Auto-Tracking in Standby",
+      isAutoTracking ? "success" : "info"
+    );
+  });
+}
+
+function updateAutoTrackUI(enabled) {
+  if (!btnAutoTrack || !autoTrackBadge) return;
+  if (enabled) {
+    btnAutoTrack.style.background = "rgba(52, 199, 89, 0.15)";
+    btnAutoTrack.style.borderColor = "var(--accent-green)";
+    btnAutoTrack.style.color = "#fff";
+    autoTrackBadge.style.background = "#34c759";
+    autoTrackBadge.style.color = "#000";
+    autoTrackBadge.textContent = "ENGAGED";
+  } else {
+    btnAutoTrack.style.background = "rgba(255, 255, 255, 0.06)";
+    btnAutoTrack.style.borderColor = "rgba(255, 255, 255, 0.12)";
+    btnAutoTrack.style.color = "var(--text-secondary)";
+    autoTrackBadge.style.background = "rgba(255, 255, 255, 0.1)";
+    autoTrackBadge.style.color = "var(--text-muted)";
+    autoTrackBadge.textContent = "STANDBY";
+  }
+}
+
+// V380 Pro / V360 Pro Night Vision Modes
 document.querySelectorAll(".btn-nv-mode").forEach(btn => {
   btn.addEventListener("click", async () => {
     if (!activePtzCamId) return;
@@ -1296,14 +1344,55 @@ if (btnTriggerSiren) {
   });
 }
 
-// V380 Pro Intercom Hold to Talk
+// V380 Pro Intercom Live Microphone Talkback
 const btnIntercomTalk = document.getElementById("btnIntercomTalk");
 const intercomLabel = document.getElementById("intercomLabel");
+const intercomLiveBadge = document.getElementById("intercomLiveBadge");
+
+let intercomStream = null;
+let intercomRecorder = null;
+
 if (btnIntercomTalk) {
   const startTalk = async () => {
     if (!activePtzCamId) return;
-    btnIntercomTalk.style.background = "rgba(52, 199, 89, 0.4)";
-    if (intercomLabel) intercomLabel.textContent = "Broadcasting Audio...";
+    btnIntercomTalk.style.background = "rgba(52, 199, 89, 0.35)";
+    if (intercomLabel) intercomLabel.textContent = "Broadcasting Mic...";
+    if (intercomLiveBadge) intercomLiveBadge.classList.remove("hidden");
+
+    // Request browser microphone and stream audio chunks
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        intercomStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const options = (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported("audio/webm;codecs=opus"))
+          ? { mimeType: "audio/webm;codecs=opus" }
+          : {};
+        intercomRecorder = new MediaRecorder(intercomStream, options);
+
+        intercomRecorder.ondataavailable = async (e) => {
+          if (e.data && e.data.size > 0 && activePtzCamId) {
+            const reader = new FileReader();
+            reader.onloadend = async () => {
+              const resParts = (reader.result || "").split(",");
+              const base64Data = resParts.length > 1 ? resParts[1] : "";
+              if (base64Data && localApiAvailable) {
+                try {
+                  await authFetch(`/api/cameras/${activePtzCamId}/talk`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ audio_base64: base64Data, format: "webm" })
+                  });
+                } catch (err) {}
+              }
+            };
+            reader.readAsDataURL(e.data);
+          }
+        };
+        intercomRecorder.start(250); // 250ms chunks
+      }
+    } catch (micErr) {
+      console.warn("Microphone access unavailable, signaling talkback state:", micErr);
+    }
+
     if (localApiAvailable) {
       try {
         await authFetch(`/api/cameras/${activePtzCamId}/control`, {
@@ -1319,6 +1408,16 @@ if (btnIntercomTalk) {
     if (!activePtzCamId) return;
     btnIntercomTalk.style.background = "rgba(52, 199, 89, 0.15)";
     if (intercomLabel) intercomLabel.textContent = "Hold to Talk";
+    if (intercomLiveBadge) intercomLiveBadge.classList.add("hidden");
+
+    if (intercomRecorder && intercomRecorder.state !== "inactive") {
+      try { intercomRecorder.stop(); } catch (e) {}
+    }
+    if (intercomStream) {
+      intercomStream.getTracks().forEach(t => t.stop());
+      intercomStream = null;
+    }
+
     if (localApiAvailable) {
       try {
         await authFetch(`/api/cameras/${activePtzCamId}/control`, {
@@ -1332,6 +1431,7 @@ if (btnIntercomTalk) {
 
   btnIntercomTalk.addEventListener("mousedown", startTalk);
   btnIntercomTalk.addEventListener("mouseup", stopTalk);
+  btnIntercomTalk.addEventListener("mouseleave", stopTalk);
   btnIntercomTalk.addEventListener("touchstart", (e) => { e.preventDefault(); startTalk(); });
   btnIntercomTalk.addEventListener("touchend", (e) => { e.preventDefault(); stopTalk(); });
 }
@@ -1361,26 +1461,150 @@ document.querySelectorAll(".btn-ptz-preset").forEach(btn => {
   });
 });
 
-// V380 Pro 24-Hour Timeline Scrubber
+// 24-Hour Timeline & Historical Playback Streaming Engine
 const v380TimelineTrack = document.getElementById("v380TimelineTrack");
+const v380EventMarkers = document.getElementById("v380EventMarkers");
 const timelineNeedle = document.getElementById("timelineNeedle");
 const timelineCurrentTime = document.getElementById("timelineCurrentTime");
-if (v380TimelineTrack && timelineNeedle) {
+const playbackBadge = document.getElementById("playbackBadge");
+const btnPlaybackStepBack = document.getElementById("btnPlaybackStepBack");
+const btnPlaybackPlayPause = document.getElementById("btnPlaybackPlayPause");
+const btnPlaybackStepFwd = document.getElementById("btnPlaybackStepFwd");
+const btnReturnLive = document.getElementById("btnReturnLive");
+
+let isPlaybackMode = false;
+let playbackCurrentSeconds = 12 * 3600;
+let playbackPlaying = false;
+let playbackInterval = null;
+
+async function loadTimelineEvents(camId) {
+  if (!v380EventMarkers || !camId) return;
+  v380EventMarkers.innerHTML = "";
+  if (!localApiAvailable) return;
+  try {
+    const res = await authFetch(`/api/cameras/${camId}/timeline`);
+    if (res.ok) {
+      const events = await res.json();
+      events.forEach(evt => {
+        const seg = document.createElement("div");
+        seg.style.position = "absolute";
+        seg.style.left = `${evt.start_pct}%`;
+        seg.style.width = `${evt.width_pct}%`;
+        seg.style.height = "100%";
+        seg.style.background = evt.color;
+        seg.style.pointerEvents = "none";
+        seg.title = `${evt.label} (${evt.start_str} - ${evt.end_str})`;
+        v380EventMarkers.appendChild(seg);
+      });
+    }
+  } catch (e) {}
+}
+
+function seekPlayback(seconds) {
+  seconds = Math.max(0, Math.min(86400, seconds));
+  playbackCurrentSeconds = seconds;
+
+  const pct = (seconds / 86400) * 100;
+  if (timelineNeedle) timelineNeedle.style.left = `${pct.toFixed(2)}%`;
+
+  const hours = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+  const timeStr = `${String(hours).padStart(2, "0")}:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  if (timelineCurrentTime) timelineCurrentTime.textContent = timeStr;
+
+  isPlaybackMode = true;
+  if (playbackBadge) playbackBadge.classList.remove("hidden");
+
+  // Route historical playback frame to camera stream
+  if (activePtzCamId) {
+    const container = document.getElementById(`videoContainer-${activePtzCamId}`);
+    if (container) {
+      const img = container.querySelector("img.video-feed");
+      if (img) {
+        img.src = `/api/cameras/${activePtzCamId}/playback?time=${seconds}&t=${Date.now()}&token=${encodeURIComponent(authToken)}`;
+      }
+    }
+  }
+}
+
+function returnToLive() {
+  isPlaybackMode = false;
+  playbackPlaying = false;
+  if (playbackInterval) {
+    clearInterval(playbackInterval);
+    playbackInterval = null;
+  }
+  if (btnPlaybackPlayPause) btnPlaybackPlayPause.textContent = "▶ Play";
+  if (playbackBadge) playbackBadge.classList.add("hidden");
+
+  const now = new Date();
+  const currentSecs = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+  if (timelineNeedle) timelineNeedle.style.left = `${((currentSecs / 86400) * 100).toFixed(1)}%`;
+  if (timelineCurrentTime) {
+    timelineCurrentTime.textContent = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}:${String(now.getSeconds()).padStart(2,"0")}`;
+  }
+
+  // Restore live stream
+  if (activePtzCamId) {
+    const container = document.getElementById(`videoContainer-${activePtzCamId}`);
+    if (container) {
+      const img = container.querySelector("img.video-feed");
+      if (img) {
+        img.src = `/api/cameras/${activePtzCamId}/stream?token=${encodeURIComponent(authToken)}`;
+      }
+    }
+  }
+  showNotification("🔴 Returned to Live Camera Stream", "success");
+}
+
+if (v380TimelineTrack) {
   v380TimelineTrack.addEventListener("click", (e) => {
     const rect = v380TimelineTrack.getBoundingClientRect();
     const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
     const pct = x / rect.width;
-    timelineNeedle.style.left = `${(pct * 100).toFixed(1)}%`;
-
-    const totalMinutes = Math.floor(pct * 24 * 60);
-    const hours = Math.floor(totalMinutes / 60);
-    const mins = totalMinutes % 60;
-    const timeStr = `${String(hours).padStart(2, "0")}:${String(mins).padStart(2, "0")}:00`;
-    if (timelineCurrentTime) {
-      timelineCurrentTime.textContent = timeStr;
-    }
-    showNotification(`Timeline scrubbed to ${timeStr}`, "info");
+    const targetSeconds = Math.floor(pct * 86400);
+    seekPlayback(targetSeconds);
+    const timeStr = timelineCurrentTime ? timelineCurrentTime.textContent : "";
+    showNotification(`Streaming playback at ${timeStr}`, "info");
   });
+}
+
+if (btnPlaybackStepBack) {
+  btnPlaybackStepBack.addEventListener("click", () => {
+    seekPlayback(playbackCurrentSeconds - 15);
+  });
+}
+
+if (btnPlaybackStepFwd) {
+  btnPlaybackStepFwd.addEventListener("click", () => {
+    seekPlayback(playbackCurrentSeconds + 15);
+  });
+}
+
+if (btnPlaybackPlayPause) {
+  btnPlaybackPlayPause.addEventListener("click", () => {
+    if (!isPlaybackMode) {
+      seekPlayback(playbackCurrentSeconds);
+    }
+    playbackPlaying = !playbackPlaying;
+    if (playbackPlaying) {
+      btnPlaybackPlayPause.textContent = "⏸ Pause";
+      playbackInterval = setInterval(() => {
+        seekPlayback(playbackCurrentSeconds + 1);
+      }, 1000);
+    } else {
+      btnPlaybackPlayPause.textContent = "▶ Play";
+      if (playbackInterval) {
+        clearInterval(playbackInterval);
+        playbackInterval = null;
+      }
+    }
+  });
+}
+
+if (btnReturnLive) {
+  btnReturnLive.addEventListener("click", returnToLive);
 }
 
 // Modals: Add / Edit Camera

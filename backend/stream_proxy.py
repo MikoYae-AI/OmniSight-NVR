@@ -48,6 +48,9 @@ class CameraStreamSession:
         self.night_vision = "auto"  # auto, color, ir, smart
         self.siren_active = False
         self.intercom_active = False
+        self.auto_tracking = False
+        self.audio_bytes_sent = 0
+        self.last_audio_tx = 0.0
         self.presets = {
             1: {"pan": 0.0, "tilt": 0.0, "zoom": 1.0},
             2: {"pan": 45.0, "tilt": 15.0, "zoom": 1.5},
@@ -71,6 +74,36 @@ class CameraStreamSession:
     def set_intercom(self, active: bool):
         with self._lock:
             self.intercom_active = bool(active)
+
+    def set_auto_tracking(self, enabled: bool):
+        with self._lock:
+            self.auto_tracking = bool(enabled)
+
+    def receive_audio_chunk(self, audio_data: bytes, audio_format: str = "webm") -> Dict[str, Any]:
+        with self._lock:
+            self.intercom_active = True
+            self.last_audio_tx = time.time()
+            self.audio_bytes_sent += len(audio_data)
+
+        ip = self.camera_info.get("ip", "")
+        if ip and not self.is_simulated:
+            try:
+                import socket
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sock.settimeout(0.2)
+                talkback_port = int(self.camera_info.get("talkback_port", 8800))
+                sock.sendto(audio_data, (ip, talkback_port))
+                sock.close()
+            except Exception:
+                pass
+
+        return {
+            "status": "ok",
+            "camera_id": self.camera_id,
+            "bytes_received": len(audio_data),
+            "total_bytes_sent": self.audio_bytes_sent,
+            "timestamp": time.time()
+        }
 
     def save_preset(self, num: int):
         with self._lock:
@@ -303,10 +336,33 @@ class CameraStreamSession:
             draw.line([(fx_adj - 20, fence_y - 15), (fx_adj + 20, fence_y - 15)], fill=(28, 34, 45), width=1)
 
         # Draw moving target (vehicle / pedestrian / security patrol / feline)
-        # Periodically trigger motion box
         cycle = (t * 0.4) % (math.pi * 2)
-        target_x = int(width / 2 + math.sin(cycle) * 260 + offset_x)
-        target_y = int(horizon + 40 + math.cos(cycle * 0.5) * 20)
+        target_world_x = width / 2 + math.sin(cycle) * 260
+        target_world_y = horizon + 40 + math.cos(cycle * 0.5) * 20
+
+        # Panning and tilting shifts view relative to world coordinates
+        offset_x = int(self.pan * 2.0)
+        offset_y = int(self.tilt * 2.0)
+        target_x = int(target_world_x - offset_x)
+        target_y = int(target_world_y - offset_y)
+
+        # Autonomous PTZ Sentry Auto-Tracking loop
+        if self.auto_tracking:
+            cx_target = width // 2
+            cy_target = horizon + 40
+            err_x = target_x - cx_target
+            err_y = target_y - cy_target
+            if abs(err_x) > 8:
+                step_x = (err_x / 60.0) * 0.8
+                self.pan = max(-180.0, min(180.0, self.pan + step_x))
+            if abs(err_y) > 6:
+                step_y = (err_y / 50.0) * 0.6
+                self.tilt = max(-90.0, min(90.0, self.tilt - step_y))
+            # Refresh coordinates after servo step
+            offset_x = int(self.pan * 2.0)
+            offset_y = int(self.tilt * 2.0)
+            target_x = int(target_world_x - offset_x)
+            target_y = int(target_world_y - offset_y)
 
         # Target bounding box (AI Detection)
         box_w, box_h = 70, 90
@@ -352,6 +408,36 @@ class CameraStreamSession:
         draw.line([(cx, cy - 15), (cx, cy + 15)], fill=(60, 70, 90), width=1)
         draw.arc([cx - 30, cy - 30, cx + 30, cy + 30], start=0, end=360, fill=(40, 48, 62), width=1)
 
+        # Auto-Tracking Sentry Lock HUD
+        if self.auto_tracking:
+            track_color = (52, 199, 89)
+            draw.line([(cx, cy), (target_x, target_y)], fill=track_color, width=1)
+            clen = 12
+            draw.line([(x1, y1), (x1 + clen, y1)], fill=track_color, width=2)
+            draw.line([(x1, y1), (x1, y1 + clen)], fill=track_color, width=2)
+            draw.line([(x2, y1), (x2 - clen, y1)], fill=track_color, width=2)
+            draw.line([(x2, y1), (x2, y1 + clen)], fill=track_color, width=2)
+            draw.line([(x1, y2), (x1 + clen, y2)], fill=track_color, width=2)
+            draw.line([(x1, y2), (x1, y2 - clen)], fill=track_color, width=2)
+            draw.line([(x2, y2), (x2 - clen, y2)], fill=track_color, width=2)
+            draw.line([(x2, y2), (x2, y2 - clen)], fill=track_color, width=2)
+            draw.text((x1, y1 - 32), "🎯 AUTO-TRACK LOCKED", fill=track_color)
+            draw.rectangle([cx - 95, 68, cx + 95, 88], fill=(15, 30, 20), outline=track_color)
+            draw.text((cx - 85, 72), "🎯 AUTO-TRACK: SENTRY LOCKED", fill=track_color)
+
+        # Intercom Talkback Live Audio HUD
+        if self.intercom_active:
+            if time.time() - self.last_audio_tx < 2.5:
+                draw.rectangle([cx - 130, 95, cx + 130, 118], fill=(10, 32, 18), outline=(52, 199, 89))
+                draw.text((cx - 120, 100), "🎙️ TALKBACK: LIVE AUDIO TX", fill=(52, 199, 89))
+                # Dynamic VU audio meter bars
+                vu_base = int(6 + 8 * abs(math.sin(t * 14)))
+                for vi in range(6):
+                    vh = max(2, int(vu_base + 5 * math.sin(t * 12 + vi)))
+                    draw.rectangle([cx + 90 + (vi * 5), 114 - vh, cx + 93 + (vi * 5), 114], fill=(52, 199, 89))
+            else:
+                self.intercom_active = False
+
         # Top-Left OSD: Camera Name & Vendor tag
         draw.text((20, 15), cam_name.upper(), fill=osd_color)
         draw.text((20, 32), vendor_tag, fill=(140, 150, 170))
@@ -384,6 +470,68 @@ class CameraStreamSession:
             draw.line([(0, sl), (width, sl)], fill=(0, 0, 0, 30))
 
         # Encode to JPEG
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=80)
+        return buf.getvalue()
+
+    def generate_playback_frame(self, target_time: float) -> bytes:
+        """Generates historical playback surveillance frame with authentic archive OSD."""
+        width = 854
+        height = 480
+        t = float(target_time)
+        now = time.time()
+        # If passed seconds within day (0..86400), convert to today's epoch
+        if t <= 86400:
+            today_start = now - (now % 86400)
+            t = today_start + t
+
+        local_tm = time.localtime(t)
+        hour = local_tm.tm_hour
+        is_night = (hour < 6 or hour >= 19)
+
+        # Base scene: night IR black-and-white vs daylight
+        bg_color = (10, 12, 14) if is_night else (18, 22, 28)
+        img = Image.new("RGB", (width, height), color=bg_color)
+        draw = ImageDraw.Draw(img)
+
+        # Ground grid & horizon
+        horizon = height // 2
+        grid_color = (25, 30, 38) if is_night else (45, 55, 70)
+        draw.line([(0, horizon), (width, horizon)], fill=grid_color, width=2)
+        for i in range(-5, 15):
+            gx = width // 2 + (i * 90)
+            draw.line([(gx, horizon), (gx * 1.5 - (width * 0.25), height)], fill=grid_color, width=1)
+
+        # Architectural structures
+        fence_y = horizon + 30
+        for fx in range(-100, width + 100, 40):
+            draw.line([(fx, fence_y - 25), (fx, fence_y + 40)], fill=(35, 42, 54), width=2)
+
+        # Target in archive
+        cycle = (t * 0.3) % (math.pi * 2)
+        target_x = int(width / 2 + math.sin(cycle) * 220)
+        target_y = int(horizon + 40 + math.cos(cycle * 0.5) * 20)
+        box_w, box_h = 70, 90
+        x1, y1 = target_x - box_w // 2, target_y - box_h // 2
+        x2, y2 = x1 + box_w, y1 + box_h
+        target_color = (180, 180, 180) if is_night else (0, 200, 255)
+        draw.rectangle([x1, y1, x2, y2], outline=target_color, width=2)
+        draw.text((x1 + 4, y1 - 16), "RECORDED MOTION", fill=target_color)
+
+        # Top Banner: PLAYBACK ARCHIVE
+        draw.rectangle([0, 0, width, 32], fill=(22, 22, 28))
+        draw.text((20, 9), f"⏪ PLAYBACK ARCHIVE • {self.camera_info.get('name', 'Camera').upper()}", fill=(255, 149, 0))
+        historical_str = time.strftime("%Y-%m-%d  %H:%M:%S", local_tm)
+        draw.text((width - 260, 9), f"RECORDED: {historical_str}", fill=(255, 255, 255))
+
+        # Bottom Telemetry & Status
+        draw.text((20, height - 30), f"TIMELINE SCRUB • {self.night_vision.upper()} PROFILE • 1.0X SPEED", fill=(120, 130, 150))
+        draw.text((width - 240, height - 30), "OMNISIGHT HISTORICAL SYNC", fill=(90, 100, 120))
+
+        # Subtle scanlines
+        for sl in range(0, height, 4):
+            draw.line([(0, sl), (width, sl)], fill=(0, 0, 0, 30))
+
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=80)
         return buf.getvalue()

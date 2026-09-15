@@ -797,6 +797,17 @@
         PAN: +000.0° | TILT: +000.0° | ZOOM: 1.0x
       </div>
 
+      <!-- Autonomous OpenCV / PTZ Sentry Auto-Tracking -->
+      <div style="margin-bottom: 12px;">
+        <button id="btnAutoTrack" style="width: 100%; padding: 9px 12px; font-size: 11px; font-weight: 600; border-radius: 10px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); color: var(--text-secondary); display: flex; align-items: center; justify-content: space-between; cursor: pointer; transition: all 0.2s;">
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <span style="font-size: 14px;">🎯</span>
+            <span id="autoTrackTitle">Autonomous Auto-Tracking</span>
+          </div>
+          <span id="autoTrackBadge" style="font-size: 9px; padding: 2px 7px; border-radius: 6px; background: rgba(255,255,255,0.1); color: var(--text-muted); font-family: monospace;">STANDBY</span>
+        </button>
+      </div>
+
       <!-- V380 / V360 Pro Night Vision Modes -->
       <div style="margin-bottom: 12px; background: rgba(0,0,0,0.3); border-radius: 10px; padding: 8px 10px;">
         <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase;">
@@ -813,8 +824,9 @@
 
       <!-- V380 / V360 Pro Intercom & Siren Action Bar -->
       <div style="display: flex; gap: 8px; margin-bottom: 12px;">
-        <button id="btnIntercomTalk" style="flex: 2; padding: 10px; font-size: 11px; font-weight: 600; border-radius: 10px; background: rgba(52, 199, 89, 0.15); border: 1px solid rgba(52, 199, 89, 0.3); color: #34c759; display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer;">
+        <button id="btnIntercomTalk" style="flex: 2; padding: 10px; font-size: 11px; font-weight: 600; border-radius: 10px; background: rgba(52, 199, 89, 0.15); border: 1px solid rgba(52, 199, 89, 0.3); color: #34c759; display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; transition: all 0.15s;">
           <span style="font-size: 14px;">🎙️</span> <span id="intercomLabel">Hold to Talk</span>
+          <span id="intercomLiveBadge" class="hidden" style="font-size: 9px; background: #ff3b30; color: #fff; padding: 1px 4px; border-radius: 4px; animation: pulse 1s infinite;">● LIVE</span>
         </button>
         <button id="btnTriggerSiren" style="flex: 1; padding: 10px; font-size: 11px; font-weight: 600; border-radius: 10px; background: rgba(255, 59, 48, 0.15); border: 1px solid rgba(255, 59, 48, 0.3); color: #ff3b30; display: flex; align-items: center; justify-content: center; gap: 4px; cursor: pointer;">
           <span>🚨</span> Siren
@@ -836,17 +848,18 @@
 
       <!-- V380 / V360 Pro 24-Hour Interactive Playback Scrubber -->
       <div style="background: rgba(0,0,0,0.4); border-radius: 10px; padding: 8px 10px;">
-        <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); margin-bottom: 4px;">
-          <span>⏱️ Timeline Playback</span>
+        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10px; color: var(--text-muted); margin-bottom: 4px;">
+          <div style="display: flex; align-items: center; gap: 5px;">
+            <span>⏱️ Timeline Playback</span>
+            <span id="playbackBadge" class="hidden" style="font-size: 8px; font-weight: bold; background: rgba(255,149,0,0.25); border: 1px solid #ff9500; color: #ff9500; padding: 1px 5px; border-radius: 3px;">⏪ ARCHIVE</span>
+          </div>
           <span id="timelineCurrentTime" style="color: var(--accent-green); font-family: monospace;">12:30:00</span>
         </div>
         <div id="v380TimelineTrack" style="position: relative; height: 18px; background: rgba(255,255,255,0.08); border-radius: 4px; overflow: hidden; cursor: pointer;">
-          <!-- Event markers -->
-          <div style="position: absolute; left: 15%; width: 10%; height: 100%; background: rgba(255, 149, 0, 0.4);" title="Motion Event"></div>
-          <div style="position: absolute; left: 45%; width: 15%; height: 100%; background: rgba(52, 199, 89, 0.4);" title="Continuous Record"></div>
-          <div style="position: absolute; left: 75%; width: 8%; height: 100%; background: rgba(255, 59, 48, 0.5);" title="Humanoid Alarm"></div>
+          <!-- Event markers loaded dynamically -->
+          <div id="v380EventMarkers" style="position: absolute; inset: 0; width: 100%; height: 100%;"></div>
           <!-- Scrubber Needle -->
-          <div id="timelineNeedle" style="position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; background: #ff3b30; box-shadow: 0 0 6px #ff3b30;"></div>
+          <div id="timelineNeedle" style="position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; background: #ff3b30; box-shadow: 0 0 6px #ff3b30; z-index: 5;"></div>
         </div>
         <div style="display: flex; justify-content: space-between; font-size: 9px; color: var(--text-muted); margin-top: 3px; font-family: monospace;">
           <span>00:00</span>
@@ -854,6 +867,14 @@
           <span>12:00</span>
           <span>18:00</span>
           <span>24:00</span>
+        </div>
+
+        <!-- Playback Navigation Bar -->
+        <div id="playbackControls" style="display: flex; gap: 5px; margin-top: 8px;">
+          <button id="btnPlaybackStepBack" title="Rewind 15 seconds" style="flex: 1; padding: 6px; font-size: 10px; border-radius: 6px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); color: #fff; cursor: pointer;">⏪ -15s</button>
+          <button id="btnPlaybackPlayPause" title="Play or Pause historical footage" style="flex: 1.2; padding: 6px; font-size: 10px; font-weight: bold; border-radius: 6px; background: rgba(0,122,255,0.2); border: 1px solid var(--apple-blue); color: #fff; cursor: pointer;">▶ Play</button>
+          <button id="btnPlaybackStepFwd" title="Forward 15 seconds" style="flex: 1; padding: 6px; font-size: 10px; border-radius: 6px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); color: #fff; cursor: pointer;">⏩ +15s</button>
+          <button id="btnReturnLive" title="Return to Live Camera Feed" style="flex: 1.2; padding: 6px; font-size: 10px; font-weight: bold; border-radius: 6px; background: rgba(255,59,48,0.2); border: 1px solid #ff3b30; color: #ff3b30; cursor: pointer;">🔴 Live</button>
         </div>
       </div>
     </div>
