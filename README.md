@@ -201,6 +201,49 @@ behavior. If access was blocked, allow local-network access for the site in brow
 and retry. Public hosted pages need a secure context (HTTPS) in browsers that enforce this
 permission.
 
+#### Mixed content: why the browser blocks your cameras, and what actually works
+
+The hosted dashboard is HTTPS; cameras, DVRs and the hub all answer on plain `http://`.
+Every modern browser refuses to let an encrypted page pull frames from an unencrypted
+device. This is **mixed content**, and it is the single most common reason a camera tile
+shows `⚠️ Browser Blocked Direct HTTP`.
+
+A frequent dead end: the advice to *click the padlock → Site settings → set **Insecure
+content** to Allow*. That permission is **Chrome-only, per-site, and often hidden**. It
+does not exist in Safari at all, and Firefox/Zen never had it.
+
+| Browser | Is there an "Insecure content" site setting? | What to do instead |
+|---|---|---|
+| **Safari** (macOS) | ❌ No — Safari gives no user-facing override | Open the hub URL directly, or use an https tunnel. With **Settings → Advanced → Show features for web developers**, `Develop → Website Settings…` exposes an *Insecure Content* entry in *some* releases only |
+| **Safari** (iOS/iPadOS) | ❌ No override exists | Hub URL or https tunnel — this is the only path |
+| **Zen Browser** / **Firefox** | ❌ No site permission (the old shield menu is Tracking Protection now) | `about:config` → `security.mixed_content.upgrade_display_content` = `false` **and** `security.mixed_content.block_active_content` = `false`. Global, not per-site |
+| **Chrome / Edge / Brave / Vivaldi / Arc** | ⚠️ Yes, but frequently absent from the padlock popover | Go straight to `chrome://settings/content/insecureContent` (`edge://`, `brave://`… in forks) and add the site under *Allowed to show insecure content*, or open `chrome://settings/content/siteDetails?site=<your-page-origin>` |
+
+Two details that trip people up even when the toggle is found:
+
+- **Firefox 127+ / Zen silently rewrite http images and video to https and block them
+  when the upgrade fails** (`security.mixed_content.upgrade_display_content`, on by
+  default). So `block_active_content` alone is *not* enough for camera snapshots — that
+  pref is the one that matters here.
+- **Chrome 84+ does the same auto-upgrade for images**, and several Chromium forks ignore
+  the per-site allow when the target is a bare IP address (`http://192.168.1.64`).
+
+Because of that, the two fixes that work everywhere, with no browser settings at all:
+
+1. **Open the hub directly** — `http://localhost:8080`, or `http://192.168.x.x:8080` from
+   another device. The hub serves this exact dashboard, so page and cameras share one
+   origin and nothing is mixed. Bookmark it.
+2. **Give the hub an https address** and paste it into **🔗 Hub**: the hub's own
+   Cloudflare quick tunnel (**📶 4G Cloud** panel → `https://xxxx.trycloudflare.com`),
+   `tailscale funnel 8080 on`, or a reverse proxy (Caddy / nginx / Traefik) with a real
+   certificate. Avoid self-signed certs — Safari rejects them outright, trading one block
+   for another.
+
+If you do force a browser override, remember it applies to **every** tab and weakens all
+of them; reset the prefs when you are done. With a Local Hub connected, none of this
+matters: discovery and frame ingest happen server-side, which is why connecting a hub
+sidesteps mixed content *and* CORS in one move.
+
 #### Signing in through the connector (remembered logins)
 
 The connector also takes an optional **username + password**. On Connect, the website
