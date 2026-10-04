@@ -19,7 +19,19 @@ import re
 from typing import Dict, Any, Optional, Iterator
 from PIL import Image, ImageDraw, ImageFont
 
-FFMPEG_BIN = shutil.which("ffmpeg")
+def _find_ffmpeg() -> Optional[str]:
+    candidates = [
+        shutil.which("ffmpeg"),
+        os.path.expanduser("~/.local/bin/ffmpeg"),
+        "/usr/local/bin/ffmpeg",
+        "/usr/bin/ffmpeg",
+    ]
+    for c in candidates:
+        if c and os.path.isfile(c) and os.access(c, os.X_OK):
+            return c
+    return None
+
+FFMPEG_BIN = _find_ffmpeg()
 
 
 #: Still-image / MJPEG endpoints used by IE & ActiveX-era cameras (and by Chinese
@@ -650,7 +662,7 @@ class CameraStreamSession:
         Tries TCP -> UDP -> HTTP tunneling. On disconnect, never permanently degrades to simulation;
         instead it draws a clean reconnecting overlay and restores the live feed automatically.
         """
-        transports = ["tcp", "udp", "http"]
+        transports = ["udp", "tcp", "http"]
         current_transport_idx = 0
         backoff = 1.0
 
@@ -714,6 +726,8 @@ class CameraStreamSession:
             finally:
                 if proc:
                     try:
+                        if proc.stdout:
+                            proc.stdout.close()
                         proc.terminate()
                         proc.wait(timeout=1.0)
                     except Exception:

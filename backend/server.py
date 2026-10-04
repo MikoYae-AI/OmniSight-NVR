@@ -19,14 +19,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 try:
     from .config_manager import ConfigManager
-    from .stream_proxy import StreamManager
+    from .stream_proxy import StreamManager, FFMPEG_BIN
     from .vendor_presets import VENDOR_PRESETS, build_stream_url
     from .discovery import run_full_discovery, probe_camera_connection, list_system_webcams
     from .recorder import RecorderManager
     from .cloud_relay import CloudRelayManager
 except (ImportError, ValueError):
     from config_manager import ConfigManager
-    from stream_proxy import StreamManager
+    from stream_proxy import StreamManager, FFMPEG_BIN
     from vendor_presets import VENDOR_PRESETS, build_stream_url
     from discovery import run_full_discovery, probe_camera_connection, list_system_webcams
     from recorder import RecorderManager
@@ -182,7 +182,7 @@ class OmniSightHandler(BaseHTTPRequestHandler):
 
         # Public API: Status
         if path == "/api/status":
-            ffmpeg_path = shutil.which("ffmpeg")
+            ffmpeg_path = FFMPEG_BIN
             self.send_json({
                 "status": "online",
                 "system": "OmniSight-NVR Hub",
