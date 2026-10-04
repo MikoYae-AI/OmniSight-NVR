@@ -1,0 +1,27 @@
+# OmniSight-NVR systemd unit — ideal for 24/7 Raspberry Pi / DietPi installs.
+#
+# Install:
+#   sudo cp deploy/omnisight.service /etc/systemd/system/omnisight.service
+#   # edit User= and WorkingDirectory= below if your paths differ
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now omnisight
+#   sudo journalctl -u omnisight -f        # watch logs
+#
+# Then open http://<pi-ip>:8080 from any device on the LAN.
+
+[Unit]
+Description=OmniSight-NVR Universal Surveillance Hub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Adjust these two lines to match your install:
+User=dietpi
+WorkingDirectory=/home/dietpi/OmniSight-NVR
+ExecStart=/usr/bin/python3 backend/server.py 8080
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

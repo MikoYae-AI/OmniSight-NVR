@@ -108,6 +108,46 @@ docker compose up -d
 
 *(Note: Docker uses `network_mode: host` to enable local ONVIF UDP multicast discovery and low-latency RTSP streaming).*
 
+### Option 3: Raspberry Pi / DietPi (24/7 NVR)
+
+A Raspberry Pi 3B+ running DietPi makes a great always-on NVR — and because the hub is
+served from the Pi on your LAN (`http://<pi-ip>:8080`, plain HTTP), all the browser
+mixed-content limits of the GitHub Pages version disappear.
+
+```bash
+sudo apt update
+sudo apt install -y python3 python3-pil ffmpeg
+git clone https://github.com/MikoYae-AI/OmniSight-NVR.git
+cd OmniSight-NVR
+./start.sh 8080
+```
+
+That's it — the core is Python standard library + Pillow. (`google-auth` is only needed
+if you enable Google login; on Debian bookworm install it inside a venv, not with pip.)
+
+**Tuning for a 1 GB Pi (important):**
+
+- **Every camera in `data/cameras.json` starts a worker at boot** — including simulated
+  ones, which render procedural frames with Pillow at their configured `fps`. Delete the
+  demo/simulated cameras you don't need, or they will eat most of the CPU on their own.
+- **RTSP ingest = software H.264 decode + MJPEG re-encode** (Debian's FFmpeg has no
+  hardware decode on Pi 3). Prefer the plugin-free HTTP MJPEG path for Hikvision
+  (`/ISAPI/Streaming/channels/101/httpPreview`) — it needs no decoding at all — or use
+  the **sub-stream** for RTSP (`/Streaming/Channels/102`) and keep `fps` around 10.
+  Realistically expect 1–2 live cameras at once, not a 4×4 matrix of 1080p.
+- Use **wired Ethernet** (the 3B+ Wi-Fi is single-stream) and check the Pi is on the same
+  subnet as the cameras (`ip a`).
+- Snapshots/recordings write to `data/` — mount a USB drive there if you record 24/7 to
+  spare the SD card.
+
+To run it as a service at boot, use the included unit:
+
+```bash
+sudo cp deploy/omnisight.service /etc/systemd/system/omnisight.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now omnisight
+```
+
 ---
 
 ## 📋 Universal Camera Compatibility Matrix (40+ Brands & Standards)
