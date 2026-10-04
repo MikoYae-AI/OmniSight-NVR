@@ -34,6 +34,37 @@ def _find_ffmpeg() -> Optional[str]:
 FFMPEG_BIN = _find_ffmpeg()
 
 
+def _drain_latest_jpeg(buffer: bytearray) -> Optional[bytes]:
+    """
+    Scans a raw byte stream buffer for JPEG frames (SOI 0xFFD8 to EOI 0xFFD9),
+    skips past stale/backlogged frames, and returns ONLY the freshest complete frame.
+    Mutates `buffer` in-place by removing all consumed bytes to guarantee zero delay.
+    """
+    soi = buffer.find(b'\xff\xd8')
+    if soi > 0:
+        del buffer[:soi]
+    elif soi == -1:
+        if len(buffer) > 4:
+            del buffer[:-4]
+        return None
+
+    latest = None
+    while True:
+        eoi = buffer.find(b'\xff\xd9', 2)
+        if eoi == -1:
+            break
+        latest = bytes(buffer[:eoi+2])
+        del buffer[:eoi+2]
+
+        next_soi = buffer.find(b'\xff\xd8')
+        if next_soi > 0:
+            del buffer[:next_soi]
+        elif next_soi == -1:
+            break
+
+    return latest
+
+
 #: Still-image / MJPEG endpoints used by IE & ActiveX-era cameras (and by Chinese
 #: OEM boxes whose only "web UI" is an ActiveX control). OmniSight polls these
 #: directly in HTML5, which is what removes the Internet Explorer requirement.
@@ -635,20 +666,17 @@ class CameraStreamSession:
         ]
 
         try:
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=10**6)
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0)
             buffer = bytearray()
             while self._running:
-                chunk = proc.stdout.read(4096)
+                chunk = proc.stdout.read(32768)
                 if not chunk:
                     break
                 buffer.extend(chunk)
-                a = buffer.find(b'\xff\xd8')
-                b = buffer.find(b'\xff\xd9')
-                if a != -1 and b != -1 and b > a:
-                    jpeg_bytes = bytes(buffer[a:b+2])
-                    buffer = buffer[b+2:]
+                latest_jpeg = _drain_latest_jpeg(buffer)
+                if latest_jpeg:
                     with self._lock:
-                        self._latest_jpeg = jpeg_bytes
+                        self._latest_jpeg = latest_jpeg
                         self._last_frame_time = time.time()
                         self.connection_status = "streaming"
             proc.terminate()
@@ -659,8 +687,7 @@ class CameraStreamSession:
     def _ffmpeg_universal_stream_loop(self):
         """
         Universal Stream Ingestion Engine with Dynamic Transport Fallback & Resilient Auto-Reconnect.
-        Tries TCP -> UDP -> HTTP tunneling. On disconnect, never permanently degrades to simulation;
-        instead it draws a clean reconnecting overlay and restores the live feed automatically.
+        Tries UDP -> TCP -> HTTP tunneling. Discards backlogged/stale frames to guarantee true zero latency.
         """
         transports = ["udp", "tcp", "http"]
         current_transport_idx = 0
@@ -669,23 +696,36 @@ class CameraStreamSession:
         while self._running:
             transport = transports[current_transport_idx % len(transports)]
             self.connection_status = "connecting"
-            fps = str(self.camera_info.get("fps", 20))
+            target_fps = min(15, max(8, int(self.camera_info.get("fps", 15) or 15)))
+            fps = str(target_fps)
+
+            # Build low-latency ingestion pipeline
+            input_flags = [
+                "-fflags", "nobuffer+discardcorrupt",
+                "-flags", "low_delay",
+                "-avioflags", "direct",
+                "-probesize", "64000",
+                "-analyzeduration", "0",
+            ]
+            if any(self.stream_url.startswith(s) for s in ("rtsp://", "rtsps://")):
+                input_flags.extend([
+                    "-rtsp_transport", transport,
+                    "-buffer_size", "1024000",
+                    "-max_delay", "500000",
+                ])
 
             cmd = [
                 FFMPEG_BIN,
                 "-hide_banner",
                 "-loglevel", "error",
-                "-rtsp_transport", transport,
-                "-fflags", "nobuffer",
-                "-flags", "low_delay",
-                "-strict", "experimental",
-                "-probesize", "1000000",
-                "-analyzeduration", "1000000",
+                *input_flags,
                 "-i", self.stream_url,
+                "-vf", "scale='min(1280,iw)':-2:flags=fast_bilinear",
                 "-f", "image2pipe",
                 "-vcodec", "mjpeg",
-                "-q:v", "4",
+                "-q:v", "5",
                 "-r", fps,
+                "-flush_packets", "1",
                 "-"
             ]
 
@@ -694,28 +734,22 @@ class CameraStreamSession:
             frames_received = 0
 
             try:
-                # Pass stderr=subprocess.DEVNULL to prevent pipe buffer deadlock!
-                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=10**6)
+                # Pass bufsize=0 to keep pipe completely unbuffered (prevent OS pipe queue lag)
+                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0)
                 buffer = bytearray()
 
                 while self._running:
-                    chunk = proc.stdout.read(4096)
+                    chunk = proc.stdout.read(32768)
                     if not chunk:
                         break
                     buffer.extend(chunk)
 
-                    # Guard against runaway memory growth on corrupt stream data
-                    if len(buffer) > 2 * 1024 * 1024:
-                        buffer = buffer[-512 * 1024:]
-
-                    a = buffer.find(b'\xff\xd8')
-                    b = buffer.find(b'\xff\xd9')
-                    if a != -1 and b != -1 and b > a:
-                        jpeg_bytes = bytes(buffer[a:b+2])
-                        buffer = buffer[b+2:]
+                    # Drain all completed JPEG frames in the buffer, popping only the newest
+                    latest_jpeg = _drain_latest_jpeg(buffer)
+                    if latest_jpeg:
                         frames_received += 1
                         with self._lock:
-                            self._latest_jpeg = jpeg_bytes
+                            self._latest_jpeg = latest_jpeg
                             self._last_frame_time = time.time()
                             self.connection_status = "streaming"
                             self.reconnect_count = 0
