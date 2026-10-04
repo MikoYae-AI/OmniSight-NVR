@@ -64,6 +64,9 @@
           <button class="btn-action btn-cloud" id="btnCloudRelay" title="4G / Cellular Cloud Remote Access & QR Code" style="border-color: rgba(52, 199, 89, 0.4); background: rgba(52, 199, 89, 0.12); color: #34c759; font-weight: 600;">
             <span class="icon">📶</span> 4G Cloud <span id="cloudRelayDot" style="display:inline-block; width:7px; height:7px; border-radius:50%; background:#34c759; margin-left:3px;"></span>
           </button>
+          <button class="btn-action btn-secondary" id="btnHubConnector" title="Connect this website to an OmniSight hub on any device (LAN, Tailscale, Cloudflare tunnel)" style="border-color: rgba(10, 132, 255, 0.4); background: rgba(10, 132, 255, 0.12); color: #0a84ff; font-weight: 600;">
+            <span class="icon">🔗</span> Hub
+          </button>
           <button class="btn-action btn-primary" id="btnAddCamera">
             <span class="icon">+</span> Add Camera
           </button>
@@ -306,6 +309,50 @@
           <button type="submit" class="btn-action btn-primary">Save New Password</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Hub Connector (cross-platform bridge) -->
+  <div class="modal-overlay hidden" id="hubConnectorModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 20px;">🔗</span>
+          <h3 style="margin: 0;">Hub Connector</h3>
+        </div>
+        <button class="btn-close" id="btnCloseHubConnectorModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="section-desc">Point this website at an OmniSight hub running on <em>any</em> device — Linux server, Windows PC, macOS, Docker, Raspberry Pi — over LAN, Tailscale, or a Cloudflare tunnel. One website, every platform.</p>
+
+        <!-- Status Card -->
+        <div style="background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; padding: 16px; margin-bottom: 16px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <span style="font-size: 13px; color: var(--text-secondary); font-weight: 500;">Connector Status</span>
+            <span id="hubConnectorStatus" style="font-size: 11px; font-family: monospace; color: #8e8e93;">No hub configured — running in standalone mode.</span>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 4px;">
+            <label style="font-size: 11px; color: var(--text-muted);">Hub URL (LAN IP, Tailscale, or https tunnel)</label>
+            <input type="text" id="hubConnectorUrlInput" placeholder="https://your-tunnel.trycloudflare.com  ·  http://192.168.1.50:8080" style="font-family: monospace; font-size: 12px; padding: 8px 12px; width: 100%;">
+          </div>
+          <p style="font-size: 11px; color: var(--text-muted); margin-top: 8px;">
+            ⚠️ From an HTTPS page (e.g. GitHub Pages), browsers only allow <strong>https</strong> hub URLs —
+            use the hub's Cloudflare tunnel URL (📶 4G Cloud panel), or simply open the hub URL directly
+            in a new tab: the same dashboard loads, served by the hub itself.
+          </p>
+        </div>
+
+        <!-- Controls -->
+        <div style="display: flex; gap: 10px; margin-top: 6px;">
+          <button type="button" class="btn-action btn-secondary" id="btnDisconnectHub" style="flex: 1; justify-content: center;">
+            <span>✂ Disconnect</span>
+          </button>
+          <button type="button" class="btn-action btn-primary" id="btnConnectHub" style="flex: 1; justify-content: center;">
+            <span>🔌 Connect &amp; Reload</span>
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 

@@ -6,6 +6,30 @@
 
 const IS_GITHUB_PAGES = window.location.hostname.includes("github.io") || window.location.protocol === "file:";
 let hubBaseUrl = "";
+
+// Global toast notifier. (Was referenced across the app but never defined —
+// every call site used to throw a ReferenceError.)
+function showNotification(message, kind = "info") {
+  try {
+    let host = document.getElementById("toastHost");
+    if (!host) {
+      host = document.createElement("div");
+      host.id = "toastHost";
+      host.style.cssText = "position:fixed; top:70px; right:16px; z-index:10000; display:flex; flex-direction:column; gap:8px; pointer-events:none;";
+      document.body.appendChild(host);
+    }
+    const colors = { success: "#34c759", error: "#ff453a", warning: "#ff9f0a", info: "#0a84ff" };
+    const color = colors[kind] || colors.info;
+    const toast = document.createElement("div");
+    toast.textContent = message;
+    toast.style.cssText = `background: rgba(20,20,24,0.92); border:1px solid ${color}66; color:#f5f5f7; border-left:3px solid ${color}; padding:10px 14px; border-radius:10px; font-size:12px; max-width:340px; box-shadow:0 8px 24px rgba(0,0,0,0.4); backdrop-filter: blur(20px);`;
+    host.appendChild(toast);
+    setTimeout(() => toast.remove(), 5000);
+  } catch (e) {
+    console.warn("[notify]", message, e);
+  }
+}
+
 function apiUrl(path) {
   return `${hubBaseUrl}${path}`;
 }
@@ -1331,6 +1355,15 @@ const ptzPanel = document.getElementById("ptzPanel");
 // 4G Cloud Relay Controls
 const btnCloudRelay = document.getElementById("btnCloudRelay");
 const btnCloseCloudRelayModal = document.getElementById("btnCloseCloudRelayModal");
+
+// Hub Connector (cross-platform bridge to any OmniSight hub)
+const hubConnectorModal = document.getElementById("hubConnectorModal");
+const btnHubConnector = document.getElementById("btnHubConnector");
+const btnCloseHubConnectorModal = document.getElementById("btnCloseHubConnectorModal");
+const hubConnectorUrlInput = document.getElementById("hubConnectorUrlInput");
+const hubConnectorStatus = document.getElementById("hubConnectorStatus");
+const btnConnectHub = document.getElementById("btnConnectHub");
+const btnDisconnectHub = document.getElementById("btnDisconnectHub");
 const cloudRelayDot = document.getElementById("cloudRelayDot");
 const cloudRelayStatusBadge = document.getElementById("cloudRelayStatusBadge");
 const cloudRelayUrlInput = document.getElementById("cloudRelayUrlInput");
@@ -1736,6 +1769,61 @@ async function fetchCloudRelayStatus() {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Hub Connector — cross-platform bridge between this website and an OmniSight
+// hub running anywhere: Linux server, Windows PC, macOS, Docker, Raspberry Pi,
+// reachable over LAN, Tailscale, or a Cloudflare tunnel URL.
+// ─────────────────────────────────────────────────────────────────────────────
+function getSavedHubUrl() {
+  return (localStorage.getItem("omnisight_hub_url") || "").trim();
+}
+
+function refreshHubConnectorUI() {
+  if (!hubConnectorUrlInput || !hubConnectorStatus) return;
+  const saved = getSavedHubUrl();
+  if (!hubConnectorUrlInput.value && saved) hubConnectorUrlInput.value = saved;
+  hubConnectorStatus.textContent = saved
+    ? `Configured: ${saved}`
+    : "No hub configured — running in standalone mode.";
+  hubConnectorStatus.style.color = saved ? "#34c759" : "#8e8e93";
+}
+
+function connectToHub() {
+  const raw = (hubConnectorUrlInput ? hubConnectorUrlInput.value : "").trim();
+  if (!raw) {
+    showNotification("Enter a hub URL first.", "error");
+    return;
+  }
+  let url;
+  try {
+    url = new URL(raw);
+  } catch (e) {
+    showNotification("That doesn't look like a valid URL.", "error");
+    return;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    showNotification("Hub URL must start with http:// or https://", "error");
+    return;
+  }
+  const clean = url.origin; // normalised, trailing slash/path stripped
+  localStorage.setItem("omnisight_hub_url", clean);
+  if (location.protocol === "https:" && url.protocol === "http:") {
+    showNotification(
+      "Saved — but browsers block this HTTPS page from calling a plain-http hub. Use an https tunnel URL, or open the hub URL directly.",
+      "warning"
+    );
+    setTimeout(() => location.reload(), 2500);
+    return;
+  }
+  showNotification(`Connecting to ${clean} …`, "success");
+  setTimeout(() => location.reload(), 600);
+}
+
+function disconnectHub() {
+  localStorage.removeItem("omnisight_hub_url");
+  location.reload();
+}
+
 // Detect Local Python Backend vs Standalone GitHub Pages Mode
 async function detectBackend() {
   const candidates = [
@@ -1803,6 +1891,12 @@ async function detectBackend() {
   appModeBadge.textContent = "GITHUB PAGES CLOUD";
   hubModeText.textContent = "GitHub Pages Mode (Local Storage + In-Browser Scanner)";
   backendBridgeStatus.textContent = "Cloud Deployment: https://mikoyae-ai.github.io/OmniSight-NVR/";
+  const savedHub = getSavedHubUrl();
+  if (savedHub) {
+    backendBridgeStatus.textContent = `Hub Connector: ${savedHub} configured but unreachable — check the hub / tunnel is running`;
+    backendBridgeStatus.style.color = "#ff9f0a";
+  }
+  refreshHubConnectorUI();
   ffmpegStatus.textContent = "ActiveX / IE Mode: Direct HTML5 Snapshot Polling Ready";
   
   // In Cloud mode, check passcode lock if configured
@@ -3756,6 +3850,30 @@ function attachEventListeners() {
         btnRestartCloudRelay.disabled = false;
         btnRestartCloudRelay.textContent = "🔄 Restart Tunnel";
       }
+    });
+  }
+
+  // Hub Connector Modal Listeners (cross-platform bridge)
+  if (btnHubConnector) {
+    btnHubConnector.addEventListener("click", () => {
+      refreshHubConnectorUI();
+      hubConnectorModal.classList.remove("hidden");
+    });
+  }
+  if (btnCloseHubConnectorModal) {
+    btnCloseHubConnectorModal.addEventListener("click", () => {
+      hubConnectorModal.classList.add("hidden");
+    });
+  }
+  if (btnConnectHub) {
+    btnConnectHub.addEventListener("click", connectToHub);
+  }
+  if (btnDisconnectHub) {
+    btnDisconnectHub.addEventListener("click", disconnectHub);
+  }
+  if (hubConnectorUrlInput) {
+    hubConnectorUrlInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") connectToHub();
     });
   }
 

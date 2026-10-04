@@ -108,45 +108,72 @@ docker compose up -d
 
 *(Note: Docker uses `network_mode: host` to enable local ONVIF UDP multicast discovery and low-latency RTSP streaming).*
 
-### Option 3: Raspberry Pi / DietPi (24/7 NVR)
+### Option 3: Self-host on any machine (cross-platform)
 
-A Raspberry Pi 3B+ running DietPi makes a great always-on NVR — and because the hub is
-served from the Pi on your LAN (`http://<pi-ip>:8080`, plain HTTP), all the browser
-mixed-content limits of the GitHub Pages version disappear.
+The hub is pure Python standard library + Pillow + optional FFmpeg — it runs the same on
+Linux, macOS, Windows, and Docker. Put it on whatever box sits on the same network as the
+cameras (server, old laptop, mini PC, Raspberry Pi — nothing here is Pi-specific):
 
+**Linux (Debian/Ubuntu/DietPi & friends)**
 ```bash
-sudo apt update
 sudo apt install -y python3 python3-pil ffmpeg
-git clone https://github.com/MikoYae-AI/OmniSight-NVR.git
-cd OmniSight-NVR
+git clone https://github.com/MikoYae-AI/OmniSight-NVR.git && cd OmniSight-NVR
+./start.sh 8080
+# run 24/7 as a service:
+sudo cp deploy/omnisight.service /etc/systemd/system/ && sudo systemctl daemon-reload
+sudo systemctl enable --now omnisight
+```
+
+**macOS**
+```bash
+brew install ffmpeg          # Pillow ships with most Python 3 installs, else: pip3 install Pillow
 ./start.sh 8080
 ```
 
-That's it — the core is Python standard library + Pillow. (`google-auth` is only needed
-if you enable Google login; on Debian bookworm install it inside a venv, not with pip.)
+**Windows**
+```powershell
+# Install Python 3.8+ from python.org, then:
+pip install Pillow
+python backend\server.py 8080
+```
+(`google-auth` is only needed if you enable Google login. On Debian bookworm install pip
+packages inside a venv.)
 
-**Tuning for a 1 GB Pi (important):**
+**Tuning on low-power hosts (mini PCs, Raspberry Pi, etc.):**
 
 - **Every camera in `data/cameras.json` starts a worker at boot** — including simulated
   ones, which render procedural frames with Pillow at their configured `fps`. Delete the
-  demo/simulated cameras you don't need, or they will eat most of the CPU on their own.
-- **RTSP ingest = software H.264 decode + MJPEG re-encode** (Debian's FFmpeg has no
-  hardware decode on Pi 3). Prefer the plugin-free HTTP MJPEG path for Hikvision
-  (`/ISAPI/Streaming/channels/101/httpPreview`) — it needs no decoding at all — or use
-  the **sub-stream** for RTSP (`/Streaming/Channels/102`) and keep `fps` around 10.
-  Realistically expect 1–2 live cameras at once, not a 4×4 matrix of 1080p.
-- Use **wired Ethernet** (the 3B+ Wi-Fi is single-stream) and check the Pi is on the same
-  subnet as the cameras (`ip a`).
-- Snapshots/recordings write to `data/` — mount a USB drive there if you record 24/7 to
-  spare the SD card.
+  demo/simulated cameras you don't need, or they will burn CPU on their own.
+- **RTSP ingest = software H.264 decode + MJPEG re-encode.** On weak CPUs prefer the
+  plugin-free HTTP MJPEG path for Hikvision (`/ISAPI/Streaming/channels/101/httpPreview`)
+  — it needs no decoding at all — or use the **sub-stream** for RTSP
+  (`/Streaming/Channels/102`) and keep `fps` around 10.
+- Keep the host on the same subnet as the cameras and prefer wired networking.
+- Snapshots/recordings write to `data/` — point it at durable storage if you record 24/7
+  (matters especially on SD-card devices).
 
-To run it as a service at boot, use the included unit:
+### 🔗 Hub Connector — link the hosted website to your hub (cross-platform)
 
-```bash
-sudo cp deploy/omnisight.service /etc/systemd/system/omnisight.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now omnisight
-```
+The hosted dashboard ([GitHub Pages](https://mikoyae-ai.github.io/OmniSight-NVR/)) can
+attach itself to any hub you run, on any OS — the **🔗 Hub** button opens the connector:
+paste a hub URL and it becomes the website's backend.
+
+| Connector path | URL to paste | Notes |
+|---|---|---|
+| Hub's own tunnel (recommended) | `https://xxxx.trycloudflare.com` | From the hub's **📶 4G Cloud** panel; needs `cloudflared` installed on the hub machine (free, no account) |
+| Tailscale | `http://100.x.y.z:8080` | Open it directly in a browser tab instead of pasting (see below) |
+| LAN | `http://192.168.x.x:8080` | Open it directly in a browser tab (see below) |
+
+Two rules worth knowing:
+
+1. **HTTPS pages can only call HTTPS hubs.** The GitHub Pages site is HTTPS, so the
+   connector accepts `https://` tunnel URLs there. Plain `http://` LAN/Tailscale URLs
+   still work perfectly — just open them directly in a tab: the hub serves the exact same
+   dashboard with the backend underneath.
+2. The connector URL is stored in `localStorage` (`omnisight_hub_url`) per browser; the
+   **✂ Disconnect** button clears it. Quick-tunnel URLs change when the tunnel restarts —
+   for a permanent connector use a named Cloudflare tunnel or Tailscale (both covered in
+   *Remote Access* below).
 
 ---
 
