@@ -18,7 +18,7 @@
       "snapshot_url": "http://192.168.1.13:80/ISAPI/Streaming/channels/101/picture",
       "channel": 1,
       "is_simulated": false,
-      "legacy_polling": true,
+      "legacy_polling": false,
       "status": "online",
       "fps": 25,
       "resolution": "1920x1080",
