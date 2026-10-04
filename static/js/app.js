@@ -2031,6 +2031,28 @@ async function detectBackend() {
     pageProtocol: window.location.protocol
   });
 
+  // On GitHub Pages, auto-discover active Cloudflare tunnel from repository metadata
+  if (IS_GITHUB_PAGES) {
+    try {
+      const endpoints = [
+        "data/active_tunnel.json",
+        "https://raw.githubusercontent.com/MikoYae-AI/OmniSight-NVR/main/data/active_tunnel.json"
+      ];
+      for (const ep of endpoints) {
+        try {
+          const tRes = await fetch(`${ep}?_t=${Date.now()}`, { cache: "no-cache" });
+          if (tRes.ok) {
+            const tData = await tRes.json();
+            if (tData.cloud_url && tData.cloud_url.startsWith("https://") && !candidates.includes(tData.cloud_url)) {
+              candidates.unshift(tData.cloud_url);
+              break;
+            }
+          }
+        } catch (e) {}
+      }
+    } catch (err) {}
+  }
+
   for (const candidate of candidates) {
     try {
       const probeUrl = candidate ? `${candidate}/api/status` : "/api/status";
@@ -2039,6 +2061,9 @@ async function detectBackend() {
         const status = await res.json();
         hubBaseUrl = candidate;
         localApiAvailable = true;
+        if (candidate) {
+          localStorage.setItem("omnisight_hub_url", candidate);
+        }
         const isTunnel = candidate.includes("trycloudflare.com");
         const heroConnectionLabel = document.getElementById("heroConnectionLabel");
         if (heroConnectionLabel) heroConnectionLabel.textContent = isTunnel ? "SECURE TUNNEL" : "LOCAL HUB";

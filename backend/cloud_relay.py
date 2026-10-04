@@ -15,6 +15,7 @@ import base64
 import io
 import threading
 import subprocess
+import json
 from typing import Optional, Dict, Any
 
 try:
@@ -120,6 +121,46 @@ class CloudRelayManager:
                 pass
         print("═" * 68 + "\n")
 
+    def _sync_active_tunnel_meta(self, url: str):
+        """Persists the active Cloudflare Quick Tunnel URL for seamless auto-discovery."""
+        try:
+            repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            tunnel_json_path = os.path.join(repo_root, "data", "active_tunnel.json")
+            os.makedirs(os.path.dirname(tunnel_json_path), exist_ok=True)
+            meta = {
+                "cloud_url": url,
+                "updated_at": int(time.time()),
+            }
+            with open(tunnel_json_path, "w", encoding="utf-8") as f:
+                json.dump(meta, f, indent=2)
+
+            def _push_meta():
+                try:
+                    subprocess.run(
+                        ["git", "add", "data/active_tunnel.json"],
+                        cwd=repo_root,
+                        check=False,
+                        timeout=5
+                    )
+                    subprocess.run(
+                        ["git", "commit", "-m", "chore(tunnel): sync active cloudflare tunnel URL [skip ci]"],
+                        cwd=repo_root,
+                        check=False,
+                        timeout=5
+                    )
+                    subprocess.run(
+                        ["git", "push", "origin", "main"],
+                        cwd=repo_root,
+                        check=False,
+                        timeout=15
+                    )
+                except Exception:
+                    pass
+
+            threading.Thread(target=_push_meta, daemon=True, name="OmniSight-TunnelGitSync").start()
+        except Exception as e:
+            print(f"[CloudRelay] Could not record active tunnel meta: {e}")
+
     def start(self):
         """Starts the outbound tunnel daemon in a background thread."""
         if self.status in ("connecting", "connected"):
@@ -169,6 +210,7 @@ class CloudRelayManager:
                             hosted_link = f"https://mikoyae-ai.github.io/OmniSight-NVR/?hub={self.cloud_url}"
                             self._generate_qr(hosted_link)
                             self._print_banner(self.cloud_url)
+                            self._sync_active_tunnel_meta(self.cloud_url)
 
                     # Timeout safety: if 30s elapsed with no URL found
                     if not self.cloud_url and (time.time() - start_time > 30):
