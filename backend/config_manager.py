@@ -92,6 +92,44 @@ DEFAULT_CAMERAS = [
         "resolution": "1920x1080",
         "ptz": True,
         "notes": "TP-Link Tapo indoor pan/tilt surveillance."
+    },
+    {
+        "id": "cam-gatocam-05",
+        "name": "Shenzhen GatoCam (All Variants)",
+        "vendor": "gatocam",
+        "group": "Perimeter",
+        "ip": "192.168.1.10",
+        "port": 554,
+        "username": "admin",
+        "password": "",
+        "stream_url": "sim://gatocam_perimeter",
+        "sub_stream_url": "sim://gatocam_perimeter_sub",
+        "channel": 0,
+        "is_simulated": True,
+        "status": "online",
+        "fps": 25,
+        "resolution": "1920x1080",
+        "ptz": True,
+        "notes": "Shenzhen GatoCam / XM OEM security camera with OpenIPC support."
+    },
+    {
+        "id": "cam-webcam-06",
+        "name": "Host HD Webcam (/dev/video0)",
+        "vendor": "usb_webcam",
+        "group": "Office",
+        "ip": "localhost",
+        "port": 0,
+        "username": "",
+        "password": "",
+        "stream_url": "sim://usb_webcam",
+        "sub_stream_url": "",
+        "channel": 0,
+        "is_simulated": True,
+        "status": "online",
+        "fps": 30,
+        "resolution": "1280x720",
+        "ptz": False,
+        "notes": "Hardware V4L2 USB/integrated webcam on host machine."
     }
 ]
 

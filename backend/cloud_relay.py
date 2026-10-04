@@ -99,10 +99,12 @@ class CloudRelayManager:
             print(f"[CloudRelay] Error generating QR data URL: {e}")
 
     def _print_banner(self, url: str):
+        hosted_link = f"https://mikoyae-ai.github.io/OmniSight-NVR/?hub={url}"
         print("\n" + "═" * 68)
         print("  ✦ OMNISIGHT-NVR 4G CLOUD RELAY ACTIVE ✦")
         print("═" * 68)
         print(f"  ✦ Global 4G/Cloud URL : \033[1;36m{url}\033[0m")
+        print(f"  ✦ Hosted Web Link     : \033[1;32m{hosted_link}\033[0m")
         print(f"  ✦ Local Network (LAN) : http://{self.local_ip}:{self.port}")
         if self.tailscale_ip:
             print(f"  ✦ Tailscale Mesh VPN  : http://{self.tailscale_ip}:{self.port}")
@@ -112,7 +114,7 @@ class CloudRelayManager:
         if QR_SUPPORT:
             try:
                 qr = qrcode.QRCode()
-                qr.add_data(url)
+                qr.add_data(hosted_link)
                 qr.print_ascii(invert=True)
             except Exception:
                 pass
@@ -164,7 +166,8 @@ class CloudRelayManager:
                         if m and m.group(0) != "https://api.trycloudflare.com":
                             self.cloud_url = m.group(0)
                             self.status = "connected"
-                            self._generate_qr(self.cloud_url)
+                            hosted_link = f"https://mikoyae-ai.github.io/OmniSight-NVR/?hub={self.cloud_url}"
+                            self._generate_qr(hosted_link)
                             self._print_banner(self.cloud_url)
 
                     # Timeout safety: if 30s elapsed with no URL found
@@ -209,10 +212,12 @@ class CloudRelayManager:
         self.start()
 
     def get_status(self) -> Dict[str, Any]:
+        hosted_url = f"https://mikoyae-ai.github.io/OmniSight-NVR/?hub={self.cloud_url}" if self.cloud_url else None
         return {
             "enabled": self.status in ("connecting", "connected"),
             "status": self.status,
             "cloud_url": self.cloud_url,
+            "hosted_url": hosted_url,
             "local_ip": self.local_ip,
             "local_url": f"http://{self.local_ip}:{self.port}",
             "tailscale_ip": self.tailscale_ip,

@@ -174,6 +174,9 @@ Two rules worth knowing:
    **✂ Disconnect** button clears it. Quick-tunnel URLs change when the tunnel restarts —
    for a permanent connector use a named Cloudflare tunnel or Tailscale (both covered in
    *Remote Access* below).
+3. **One-Click Deep Linking (`?hub=`)**: The hosted web app accepts a direct hub query parameter
+   (e.g. `https://mikoyae-ai.github.io/OmniSight-NVR/?hub=https://xxxx.trycloudflare.com`),
+   automatically binding to your backend and loading your cameras on launch without manual pasting.
 
 #### Browser Local Network permission
 
