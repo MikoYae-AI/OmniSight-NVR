@@ -54,6 +54,10 @@ WS_DISCOVERY_PROBE_XML = """<?xml version="1.0" encoding="UTF-8"?>
 
 COMMON_CAMERA_PORTS = [554, 8554, 6688, 34567, 37777, 8000, 8899, 2020, 5000, 80, 8080, 7447]
 
+#: Ports that carry RTSP / vendor SDK protocols - never treated as an HTTP web UI,
+#: so a user-supplied port on one of these stays an RTSP hint.
+RTSP_ONLY_PORTS = {554, 8554, 7447, 5000, 6688, 10554, 34567, 37777, 8000, 8899, 2020}
+
 
 def get_local_ip() -> str:
     """Discovers the active primary local IP address."""
@@ -353,7 +357,10 @@ def probe_single_http_snapshot(ip: str, port: int, path: str, username: str = ""
         req = urllib.request.Request(url, headers={"User-Agent": "OmniSight/1.0"})
         with opener.open(req, timeout=timeout) as resp:
             content_type = resp.headers.get("Content-Type", "").lower()
-            data = resp.read(2048)
+            # read1() returns as soon as bytes are available; plain read() can block
+            # for the full timeout on endless multipart MJPEG feeds.
+            reader = getattr(resp, "read1", None) or resp.read
+            data = reader(2048)
             elapsed = time.time() - t0
             # JPEG magic bytes \xff\xd8
             is_jpeg = data.startswith(b"\xff\xd8") or "image" in content_type
@@ -427,6 +434,10 @@ def probe_camera_connection(
                 break
 
     http_port = 80 if 80 in open_ports else (8080 if 8080 in open_ports else (88 if 88 in open_ports else None))
+    # An explicitly supplied port wins when it can serve HTTP: the user is telling us
+    # exactly where the camera's web interface lives (e.g. a DVR on :8099 or :88).
+    if port and port in open_ports and port not in RTSP_ONLY_PORTS:
+        http_port = port
 
     confirmed_rtsp_path = None
     detected_codec = "H.264"
@@ -536,14 +547,22 @@ def probe_camera_connection(
     if http_port:
         candidate_snaps = []
         if preset.get("snapshot_url"):
-            snap_path = re.sub(r"^http://[^/]+/", "/", preset["snapshot_url"]).split("?")[0]
-            candidate_snaps.append(snap_path.replace("{channel}", "1"))
+            # Keep the query string: many ActiveX-era endpoints only answer to
+            # e.g. /webcapture.jpg?command=snap&channel=1 and 404 on the bare path.
+            snap_path = re.sub(r"^https?://[^/]+", "", preset["snapshot_url"]) or "/snapshot.jpg"
+            snap_path = (
+                snap_path.replace("{channel_index}", "0")
+                .replace("{channel}", "1")
+                .replace("{username}", discovered_username or username or "admin")
+                .replace("{password}", discovered_password or password or "")
+            )
+            candidate_snaps.append(snap_path)
         for s_path in COMMON_SNAPSHOT_CANDIDATE_PATHS:
             if s_path not in candidate_snaps:
                 candidate_snaps.append(s_path)
 
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = {executor.submit(probe_single_http_snapshot, ip, http_port, path, discovered_username, discovered_password): path for path in candidate_snaps[:8]}
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            futures = {executor.submit(probe_single_http_snapshot, ip, http_port, path, discovered_username, discovered_password): path for path in candidate_snaps[:14]}
             for fut in as_completed(futures):
                 sres = fut.result()
                 if sres:
@@ -576,11 +595,20 @@ def probe_camera_connection(
         sub_path = confirmed_rtsp_path.replace("101", "102").replace("subtype=0", "subtype=1").replace("stream1", "stream2").replace("main", "sub")
         if sub_path != confirmed_rtsp_path:
             final_sub_url = f"rtsp://{cred}{ip}:{rtsp_port}{sub_path}"
+    elif confirmed_snapshot_url:
+        # No RTSP path was actually confirmed - never fabricate one. Cameras that only
+        # ever worked in Internet Explorer (ActiveX) frequently keep port 554 open with
+        # no usable stream path, so a guessed RTSP URL would just fail forever.
+        # The verified still-image endpoint is the source that really works.
+        final_stream_url = confirmed_snapshot_url
+    elif preset.get("snapshot_first") and http_port:
+        # ActiveX-era hardware: the snapshot endpoint is the dependable source.
+        final_stream_url = build_stream_url(
+            detected_vendor, ip, http_port, discovered_username, discovered_password, channel=1, stream_type="main"
+        )
     elif rtsp_port:
         final_stream_url = build_stream_url(detected_vendor, ip, rtsp_port, discovered_username, discovered_password, channel=1, stream_type="main")
         final_sub_url = build_stream_url(detected_vendor, ip, rtsp_port, discovered_username, discovered_password, channel=1, stream_type="sub")
-    elif confirmed_snapshot_url:
-        final_stream_url = confirmed_snapshot_url
 
     if not confirmed_snapshot_url and preset.get("snapshot_url"):
         confirmed_snapshot_url = preset["snapshot_url"].format(
@@ -594,6 +622,11 @@ def probe_camera_connection(
     summary_text = auth_summary or f"Camera responded at {ip} on port {rtsp_port or http_port}. Codec: {detected_codec}."
     if snapshot_unauthenticated and password_status == "custom_required":
         summary_text += " (Note: Live HTTP snapshot stream is unlocked with NO password!)"
+    if final_stream_url.startswith(("http://", "https://")) and not confirmed_rtsp_path:
+        summary_text += (
+            f" No RTSP path responded - using the verified HTML5 snapshot endpoint "
+            f"({confirmed_snapshot_url or final_stream_url}), so no Internet Explorer/ActiveX plugin is needed."
+        )
 
     return {
         "success": True,

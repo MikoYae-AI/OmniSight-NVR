@@ -22,6 +22,135 @@ from PIL import Image, ImageDraw, ImageFont
 FFMPEG_BIN = shutil.which("ffmpeg")
 
 
+#: Still-image / MJPEG endpoints used by IE & ActiveX-era cameras (and by Chinese
+#: OEM boxes whose only "web UI" is an ActiveX control). OmniSight polls these
+#: directly in HTML5, which is what removes the Internet Explorer requirement.
+#: Placeholders: {ip} {port} {username} {password} {channel} {channel_index}
+LEGACY_SNAPSHOT_CANDIDATES = (
+    "/webcapture.jpg?command=snap&channel={channel}",
+    "/webcapture.jpg?command=snap&channel={channel_index}",
+    "/snapshot.jpg",
+    "/cgi-bin/snapshot.cgi?channel={channel}",
+    "/ISAPI/Streaming/channels/{channel}01/picture",
+    "/PSIA/Streaming/channels/{channel}01/picture",
+    "/onvif-http/snapshot?Profile_1",
+    "/image/jpeg.cgi",
+    "/cgi-bin/viewer/video.jpg?channel={channel}",
+    "/tmpfs/auto.jpg",
+    "/videostream.cgi?user={username}&pwd={password}",
+    "/cgi-bin/CGIProxy.fcgi?cmd=snapPicture2&usr={username}&pwd={password}",
+)
+
+#: Continuous multipart-MJPEG endpoints. These deliver live video over plain HTTP with
+#: no RTSP, no FFmpeg and no browser plugin, which makes them the best possible source
+#: for cameras whose only officially "supported" client was an ActiveX control.
+#: Hikvision's /ISAPI/Streaming/channels/<ch>01/httpPreview is the classic example - it
+#: is exactly what the WebComponents.exe plugin consumed, and it answers a plain HTTP
+#: GET with HTTP Digest auth.
+VENDOR_MJPEG_CANDIDATES = {
+    "hikvision": (
+        "/ISAPI/Streaming/channels/{channel}01/httpPreview",
+        "/PSIA/Streaming/channels/{channel}01/httpPreview",
+    ),
+    "hikvision_dvr": (
+        "/ISAPI/Streaming/channels/{channel}01/httpPreview",
+        "/PSIA/Streaming/channels/{channel}01/httpPreview",
+    ),
+    "dahua": ("/cgi-bin/mjpg/video.cgi?channel={channel}&subtype=1",),
+    "amcrest": ("/cgi-bin/mjpg/video.cgi?channel={channel}&subtype=1",),
+    "foscam": ("/cgi-bin/CGIStream.cgi?cmd=GetMJStream&usr={username}&pwd={password}",),
+    "axis": ("/axis-cgi/mjpg/video.cgi",),
+    "esp32_cam": ("/stream",),
+    "ip_webcam": ("/videofeed", "/mjpegfeed", "/video"),
+}
+
+#: Vendor-preferred endpoints, tried before the generic legacy list. These are the
+#: native "no plugin" still-image CGIs for the big CCTV families.
+VENDOR_SNAPSHOT_CANDIDATES = {
+    "legacy_activex": LEGACY_SNAPSHOT_CANDIDATES,
+    "xiongmai": ("/webcapture.jpg?command=snap&channel={channel}", "/snapshot.jpg", "/cgi-bin/snapshot.cgi"),
+    "gatocam": ("/webcapture.jpg?command=snap&channel={channel}", "/snapshot.jpg", "/cgi-bin/snapshot.cgi"),
+    "xiongmai_dvr": ("/webcapture.jpg?command=snap&channel={channel}", "/snapshot.jpg"),
+    "v380": ("/snapshot.jpg", "/webcapture.jpg?command=snap&channel={channel}", "/cgi-bin/snapshot.cgi"),
+    "v360": ("/snapshot.jpg", "/webcapture.jpg?command=snap&channel={channel}", "/cgi-bin/snapshot.cgi"),
+    "yoosee": ("/snapshot.jpg", "/webcapture.jpg?command=snap&channel={channel}"),
+    "icsee": ("/snapshot.jpg", "/webcapture.jpg?command=snap&channel={channel}"),
+    # Hikvision (incl. DS-2CD* R6 platform, which is the family that demands
+    # WebComponents.exe in Internet Explorer): ISAPI first, then the older PSIA
+    # API and the pre-ISAPI /Streaming/Channels path used by early firmware.
+    "hikvision": (
+        "/ISAPI/Streaming/channels/{channel}01/picture",
+        "/PSIA/Streaming/channels/{channel}01/picture",
+        "/Streaming/Channels/{channel}01/picture",
+        "/onvif-http/snapshot?Profile_1",
+        "/cgi-bin/snapshot.cgi",
+    ),
+    "hikvision_dvr": (
+        "/ISAPI/Streaming/channels/{channel}01/picture",
+        "/PSIA/Streaming/channels/{channel}01/picture",
+        "/Streaming/Channels/{channel}01/picture",
+        "/cgi-bin/snapshot.cgi?chn={channel}",
+        "/onvif-http/snapshot?Profile_1",
+    ),
+    "dahua": ("/cgi-bin/snapshot.cgi?channel={channel}", "/cgi-bin/snapshot.cgi", "/onvif-http/snapshot?Profile_1"),
+    "amcrest": ("/cgi-bin/snapshot.cgi?channel={channel}", "/cgi-bin/snapshot.cgi", "/onvif-http/snapshot?Profile_1"),
+    "uniview": ("/images/snapshot.jpg", "/cgi-bin/snapshot.cgi"),
+    "axis": ("/axis-cgi/jpg/image.cgi", "/jpg/image.jpg"),
+    "dlink": ("/image/jpeg.cgi", "/cgi-bin/video.jpg"),
+    "trendnet": ("/cgi-bin/video.jpg", "/tmpfs/auto.jpg"),
+    "vivotek": ("/cgi-bin/viewer/video.jpg?channel={channel}",),
+    "foscam": ("/cgi-bin/CGIProxy.fcgi?cmd=snapPicture2&usr={username}&pwd={password}", "/snapshot.jpg"),
+    "reolink": ("/cgi-bin/api.cgi?cmd=Snap&channel={channel}&user={username}&password={password}",),
+    "tapo": ("/cgi-bin/snapshot.jpg", "/snapshot.jpg"),
+    "kasa": ("/cgi-bin/snapshot.jpg", "/snapshot.jpg"),
+    "esp32_cam": ("/capture", "/snapshot.jpg"),
+    "ip_webcam": ("/shot.jpg", "/photo.jpg"),
+}
+
+
+class _PasswordMgr(urllib.request.HTTPPasswordMgr):
+    """Attaches the session's camera credentials to every auth realm of one host."""
+
+    def __init__(self, session, url: str):
+        super().__init__()
+        camera = session.camera_info
+        self._username = camera.get("username", "") or ""
+        self._password = camera.get("password", "") or ""
+        self._origin = session._origin_of(url)
+
+    def find_user_password(self, realm, authuri):
+        if self._username and authuri.startswith(self._origin):
+            return self._username, self._password
+        return None, None
+
+
+def format_snapshot_url(pattern: str, ip: str, port: Any, channel: Any, username: str = "", password: str = "") -> str:
+    """Expands a snapshot endpoint template into a fully qualified URL."""
+    try:
+        channel_int = int(channel)
+    except (ValueError, TypeError):
+        channel_int = 1
+    try:
+        port_int = int(port) if port else 80
+    except (ValueError, TypeError):
+        port_int = 80
+    if port_int <= 0:
+        port_int = 80
+
+    url = pattern
+    if not url.startswith(("http://", "https://")):
+        url = f"http://{ip}:{port_int}{url if url.startswith('/') else '/' + url}"
+
+    return (
+        url.replace("{ip}", ip or "")
+        .replace("{port}", str(port_int))
+        .replace("{username}", urllib.parse.quote(username or "", safe=""))
+        .replace("{password}", urllib.parse.quote(password or "", safe=""))
+        .replace("{channel_index}", str(max(0, channel_int - 1)))
+        .replace("{channel}", str(channel_int))
+    )
+
+
 class CameraStreamSession:
     """Manages stream ingestion, hardware PTZ, and client distribution for a single camera."""
 
@@ -42,6 +171,13 @@ class CameraStreamSession:
         self._last_frame_time = 0.0
         self.connection_status = "idle"  # idle, connecting, streaming, reconnecting, error
         self.reconnect_count = 0
+        self.source_kind = "unknown"  # webcam, browser_node, ffmpeg, snapshot, simulation
+        self.last_error = ""
+        self.started_at = time.time()
+        # Remembered still-image endpoint for IE/ActiveX-era cameras
+        self._working_snapshot_url: str = ""
+        # Remembered continuous-MJPEG endpoint (e.g. Hikvision ISAPI httpPreview)
+        self._working_mjpeg_url: str = ""
         
         # PTZ State (Virtual coordinates + Hardware Tracking)
         self.pan = 0.0     # -180 to 180 degrees
@@ -278,15 +414,120 @@ class CameraStreamSession:
         with self._lock:
             if self._latest_jpeg:
                 return self._latest_jpeg
-        return self._generate_simulated_frame(0)
+            status = self.connection_status
+            name = self.camera_info.get("name", "CAMERA")
+            src = self.camera_info.get("ip") or self.stream_url or "NO SOURCE"
+        # Nothing has arrived yet: draw an honest HUD frame instead of a fake camera scene.
+        msg = f"{name.upper()} @ {src}\nINITIALIZING {self.source_kind.upper()} INGEST...\nSTATUS: {status.upper()}"
+        return self._draw_connecting_frame(msg, status_color=(0, 200, 255))
+
+    def get_status(self) -> Dict[str, Any]:
+        """Live telemetry for the dashboard: real online/offline state for this camera."""
+        with self._lock:
+            now = time.time()
+            age = (now - self._last_frame_time) if self._last_frame_time else None
+            status = self.connection_status
+            # A stream that stopped delivering frames is not really "streaming".
+            if status == "streaming" and (age is None or age > 10.0):
+                status = "reconnecting"
+            return {
+                "camera_id": self.camera_id,
+                "status": status,
+                "online": status == "streaming",
+                "source_kind": self.source_kind,
+                "last_frame_age": age,
+                "reconnect_count": self.reconnect_count,
+                "has_frame": self._latest_jpeg is not None,
+                "last_error": self.last_error,
+                "uptime": now - self.started_at,
+            }
+
+    def _draw_error_loop(self, message: str):
+        """Keeps a camera visible with an actionable HUD when it cannot be ingested at all."""
+        while self._running:
+            with self._lock:
+                self._latest_jpeg = self._draw_connecting_frame(message, status_color=(255, 69, 58))
+            time.sleep(2.0)
+
+    #: URL schemes that require an FFmpeg ingest pipeline
+    STREAM_FEED_SCHEMES = ("rtsp://", "rtsps://", "rtmp://", "rtmps://", "http://", "https://")
+
+    #: Cameras that historically only worked in Internet Explorer / ActiveX.
+    #: Their native RTSP paths are undocumented or absent, so they are driven
+    #: through HTTP still-image polling (endpoint discovered automatically).
+    LEGACY_VENDORS = ("legacy_activex", "activex", "legacy_ie")
+
+    def is_legacy_ie_camera(self) -> bool:
+        vendor = (self.camera_info.get("vendor") or "").strip().lower()
+        return (
+            vendor in self.LEGACY_VENDORS
+            or bool(self.camera_info.get("requires_activex"))
+            or bool(self.camera_info.get("activex"))
+        )
+
+    def classify_source(self) -> str:
+        """Resolves which ingestion engine this camera actually needs.
+
+        A camera is only treated as simulated when it has no real source URL.
+        This matters because the UI stores a legacy ``is_simulated`` flag that
+        used to silently disable RTSP ingestion for real cameras.
+        """
+        url = (self.stream_url or "").strip()
+        vendor = (self.camera_info.get("vendor") or "").strip()
+
+        if url.startswith("webcam://") or vendor == "usb_webcam":
+            return "webcam"
+        if url.startswith("node://") or vendor == "browser_node":
+            return "browser_node"
+        if url.startswith("sim://") or vendor == "simulated" or not url:
+            return "simulation"
+
+        # ActiveX-era cameras: never trust a fabricated RTSP path. If the camera
+        # is on the LAN, drive it through still-image polling instead.
+        if self.is_legacy_ie_camera():
+            if url.startswith(("http://", "https://")) or self.camera_info.get("ip"):
+                return "snapshot"
+            return "simulation"
+
+        if any(url.startswith(p) for p in self.STREAM_FEED_SCHEMES) or url.endswith(".m3u8"):
+            # RTSP/RTMP/HLS always needs FFmpeg; plain HTTP may be a snapshot URL.
+            if any(url.startswith(p) for p in ("rtsp://", "rtsps://", "rtmp://", "rtmps://")) or url.endswith(".m3u8"):
+                return "ffmpeg"
+            # HTTP(S): treat as a live feed only when FFmpeg is available and we
+            # are not explicitly configured for snapshot polling.
+            if FFMPEG_BIN and not self.camera_info.get("legacy_polling") and not self.camera_info.get("snapshot_url"):
+                return "ffmpeg"
+            return "snapshot" if self._snapshot_capable() else "ffmpeg"
+        return "snapshot" if self._snapshot_capable() else "simulation"
+
+    def _snapshot_capable(self) -> bool:
+        """True when this camera can be polled through an HTTP still-image endpoint."""
+        if (
+            self.camera_info.get("snapshot_url")
+            or self.camera_info.get("legacy_polling")
+            or self.is_legacy_ie_camera()
+        ):
+            return True
+
+        ip = self.camera_info.get("ip")
+        if not ip:
+            return False
+        if self.stream_url.startswith(("http://", "https://")) or self.is_simulated:
+            return True
+
+        # We know plugin-free HTTP endpoints for this vendor (e.g. Hikvision ISAPI /
+        # PSIA snapshots and httpPreview MJPEG), so the camera can always be ingested
+        # even if its RTSP stream is unavailable or FFmpeg is missing.
+        vendor = (self.camera_info.get("vendor") or "").strip().lower()
+        return bool(VENDOR_SNAPSHOT_CANDIDATES.get(vendor) or VENDOR_MJPEG_CANDIDATES.get(vendor))
 
     def _worker_loop(self):
         """Universal Dispatcher: FFmpeg (RTSP/RTMP/HLS), USB Webcam, Browser Node, HTTP Snapshot, or Simulator."""
-        ip = self.camera_info.get("ip", "")
-        vendor = self.camera_info.get("vendor", "")
+        source_kind = self.classify_source()
+        self.source_kind = source_kind
 
         # 1. Local USB / DirectShow Webcam
-        if self.stream_url.startswith("webcam://") or vendor == "usb_webcam":
+        if source_kind == "webcam":
             if FFMPEG_BIN:
                 self._ffmpeg_webcam_loop()
             else:
@@ -294,20 +535,38 @@ class CameraStreamSession:
             return
 
         # 2. Browser Camera Node (Phone or Laptop streaming to NVR)
-        if self.stream_url.startswith("node://") or vendor == "browser_node":
+        if source_kind == "browser_node":
             self._browser_node_loop()
             return
 
-        # 3. Live Stream Feeds (RTSP, RTSPS, RTMP, HLS .m3u8, or HTTP-FLV)
-        is_stream_feed = any(self.stream_url.startswith(p) for p in ("rtsp://", "rtsps://", "rtmp://", "rtmps://")) or self.stream_url.endswith(".m3u8")
-        if not self.is_simulated and FFMPEG_BIN and is_stream_feed:
-            self._ffmpeg_universal_stream_loop()
+        # 3. Live Stream Feeds (RTSP, RTSPS, RTMP, HLS .m3u8) -> FFmpeg ingest
+        if source_kind == "ffmpeg":
+            if FFMPEG_BIN:
+                self._ffmpeg_universal_stream_loop()
+                return
+            # No FFmpeg on this host: degrade gracefully instead of disabling the camera.
+            if self._snapshot_capable():
+                self.last_error = "FFmpeg unavailable - using plugin-free HTTP ingest."
+                # Prefer a continuous MJPEG endpoint (full framerate), then still images.
+                if self._mjpeg_stream_loop():
+                    return
+                self.source_kind = "snapshot"
+                self._http_snapshot_polling_loop()
+                return
+            self.connection_status = "error"
+            self.last_error = "FFmpeg is not installed; cannot ingest this live stream."
+            self._draw_error_loop("FFMPEG NOT INSTALLED\nINSTALL FFMPEG TO INGEST RTSP/RTMP/HLS")
             return
 
-        # 4. HTTP Snapshot Polling (Direct camera picture polling with zero IE or ActiveX)
-        if (not self.is_simulated or (ip and not self.stream_url.startswith("sim://"))) and (
-            self.camera_info.get("snapshot_url") or self.camera_info.get("legacy_polling") or ip
-        ):
+        # 3b. Continuous MJPEG over HTTP (Hikvision ISAPI httpPreview, Dahua mjpg,
+        # Axis, ESP32-CAM...). Live video with no RTSP, no FFmpeg and no browser
+        # plugin - the direct replacement for an ActiveX control like
+        # Hikvision's WebComponents.exe. Falls through to snapshot polling if the
+        # camera exposes no MJPEG endpoint.
+        if source_kind == "snapshot" and self._snapshot_capable():
+            if self._mjpeg_stream_loop():
+                return
+            # 4. HTTP Snapshot Polling (Direct camera picture polling with zero IE or ActiveX)
             self._http_snapshot_polling_loop()
             return
 
@@ -326,7 +585,12 @@ class CameraStreamSession:
                 self.connection_status = "connecting"
                 msg = f"BROWSER CAMERA NODE READY\nAWAITING STREAM FROM DEVICE\n{self.camera_info.get('name', 'Camera')}"
                 with self._lock:
-                    self._latest_jpeg = self._draw_connecting_frame(msg, status_color=(0, 200, 255))
+                    # Re-check under the lock: a frame pushed by the browser node between
+                    # the check above and here must never be overwritten by the placeholder.
+                    if self._latest_jpeg and (time.time() - self._last_frame_time < 5.0):
+                        self.connection_status = "streaming"
+                    else:
+                        self._latest_jpeg = self._draw_connecting_frame(msg, status_color=(0, 200, 255))
                 time.sleep(1.0)
 
     def _ffmpeg_webcam_loop(self):
@@ -466,6 +730,21 @@ class CameraStreamSession:
             self.reconnect_count += 1
             self.connection_status = "reconnecting"
 
+            # RTSP keeps failing but the vendor exposes a still-image CGI (Hikvision ISAPI,
+            # Dahua CGI, XM snapshot.jpg ...): fall back to snapshot polling instead of
+            # showing a dead card forever.
+            if frames_received == 0 and self.reconnect_count >= 3 and self._snapshot_capable():
+                self.last_error = (
+                    f"{transport.upper()} ingest failed {self.reconnect_count}x - "
+                    "switched to plugin-free HTTP ingest."
+                )
+                self.connection_status = "connecting"
+                if self._mjpeg_stream_loop():
+                    return
+                self.source_kind = "snapshot"
+                self._http_snapshot_polling_loop()
+                return
+
             # Display authentic reconnecting HUD overlay
             ip = self.camera_info.get("ip", "")
             cam_name = self.camera_info.get("name", "Camera")
@@ -479,6 +758,205 @@ class CameraStreamSession:
 
             time.sleep(backoff)
             backoff = min(5.0, backoff * 1.5)
+
+    def _snapshot_url_candidates(self) -> list:
+        """Ordered list of snapshot URLs to try for this camera.
+
+        The configured/explicit URL wins; otherwise vendor-specific endpoints are
+        tried before the generic IE/ActiveX-era list. The endpoint that last
+        worked is remembered first so polling stays stable.
+        """
+        ip = (self.camera_info.get("ip") or "").strip()
+        channel = self.camera_info.get("channel", 1)
+        vendor = (self.camera_info.get("vendor") or "").strip().lower()
+        username = self.camera_info.get("username", "")
+        password = self.camera_info.get("password", "")
+
+        candidates = []
+        if self._working_snapshot_url:
+            candidates.append(self._working_snapshot_url)
+
+        explicit = (self.camera_info.get("snapshot_url") or "").strip()
+        if explicit:
+            candidates.append(format_snapshot_url(explicit, ip, self._snapshot_port(), channel, username, password))
+
+        # The stream_url of a legacy/polling camera is often itself the snapshot URL
+        if self.stream_url.startswith(("http://", "https://")):
+            candidates.append(self.stream_url)
+
+        if ip:
+            patterns = list(VENDOR_SNAPSHOT_CANDIDATES.get(vendor, ()))
+            if self.is_legacy_ie_camera():
+                patterns += [p for p in LEGACY_SNAPSHOT_CANDIDATES if p not in patterns]
+            for pattern in patterns:
+                candidates.append(
+                    format_snapshot_url(pattern, ip, self._snapshot_port(), channel, username, password)
+                )
+
+        # Preserve order while removing duplicates
+        seen = set()
+        ordered = []
+        for url in candidates:
+            if url and url not in seen:
+                seen.add(url)
+                ordered.append(url)
+        return ordered
+
+    def _snapshot_port(self) -> int:
+        """HTTP port to use for still-image polling (RTSP ports are never relevant here)."""
+        port = self.camera_info.get("port")
+        try:
+            port_int = int(port)
+        except (ValueError, TypeError):
+            port_int = 0
+        if port_int in (0, 554, 8554, 7447, 10554):
+            return 80
+        return port_int
+
+    def _mjpeg_candidates(self) -> list:
+        """Ordered multipart-MJPEG endpoints to try (explicit URL first, then vendor ones)."""
+        ip = (self.camera_info.get("ip") or "").strip()
+        if not ip:
+            return []
+        channel = self.camera_info.get("channel", 1)
+        vendor = (self.camera_info.get("vendor") or "").strip().lower()
+        username = self.camera_info.get("username", "")
+        password = self.camera_info.get("password", "")
+
+        candidates = []
+        if self._working_mjpeg_url:
+            candidates.append(self._working_mjpeg_url)
+        explicit = (self.camera_info.get("mjpeg_url") or "").strip()
+        if explicit:
+            candidates.append(
+                format_snapshot_url(explicit, ip, self._snapshot_port(), channel, username, password)
+            )
+        for pattern in VENDOR_MJPEG_CANDIDATES.get(vendor, ()):
+            candidates.append(
+                format_snapshot_url(pattern, ip, self._snapshot_port(), channel, username, password)
+            )
+
+        seen = set()
+        return [url for url in candidates if url and not (url in seen or seen.add(url))]
+
+    def _consume_mjpeg_stream(self, url: str, first_frame_timeout: float = 5.0) -> bool:
+        """Reads JPEG frames continuously from one MJPEG endpoint.
+
+        Returns True once at least one complete frame was received (the stream is live),
+        False if the endpoint never produced a frame. Handles the endless
+        multipart/x-mixed-replace response body by framing on JPEG SOI/EOI markers.
+        """
+        got_frame = False
+        deadline = time.time() + first_frame_timeout
+
+        try:
+            pwd_mgr = _PasswordMgr(self, url)
+            opener = urllib.request.build_opener(
+                urllib.request.HTTPDigestAuthHandler(pwd_mgr),
+                urllib.request.HTTPBasicAuthHandler(pwd_mgr),
+            )
+            req = urllib.request.Request(
+                self._strip_credentials(url), headers={"User-Agent": "OmniSight/1.0"}
+            )
+            with opener.open(req, timeout=max(4.0, first_frame_timeout)) as resp:
+                reader = getattr(resp, "read1", None) or resp.read
+                buffer = bytearray()
+                while self._running:
+                    if not got_frame and time.time() > deadline:
+                        self.last_error = (
+                            f"MJPEG endpoint produced no frames: {self._snapshot_path_label(url)}"
+                        )
+                        return False
+                    chunk = reader(65536)
+                    if not chunk:
+                        break
+                    buffer.extend(chunk)
+                    if len(buffer) > 4 * 1024 * 1024:
+                        buffer = buffer[-1024 * 1024:]
+
+                    while True:
+                        start = buffer.find(b"\xff\xd8")
+                        if start == -1:
+                            break
+                        end = buffer.find(b"\xff\xd9", start + 2)
+                        if end == -1:
+                            if start > 0:
+                                del buffer[:start]
+                            break
+                        frame = bytes(buffer[start:end + 2])
+                        del buffer[:end + 2]
+                        if len(frame) > 200:
+                            with self._lock:
+                                self._latest_jpeg = frame
+                                self._last_frame_time = time.time()
+                                self.connection_status = "streaming"
+                                self.last_error = ""
+                            if not got_frame:
+                                self._working_mjpeg_url = url
+                                self.camera_info["mjpeg_url"] = url
+                                self.source_kind = "mjpeg"
+                            got_frame = True
+        except Exception as exc:
+            if not got_frame:
+                self.last_error = str(exc) or exc.__class__.__name__
+            return got_frame
+
+        if not got_frame:
+            self.last_error = f"No frames from MJPEG endpoint {self._snapshot_path_label(url)}"
+        return got_frame
+
+    def _mjpeg_stream_loop(self) -> bool:
+        """Streams live MJPEG video without RTSP/FFmpeg. False if no endpoint produced frames."""
+        candidates = self._mjpeg_candidates()
+        if not candidates:
+            return False
+
+        name = self.camera_info.get("name", "CAMERA")
+        ip = self.camera_info.get("ip", "")
+
+        for url in candidates:
+            if not self._running:
+                return False
+            self.connection_status = "connecting"
+            with self._lock:
+                self._latest_jpeg = self._draw_connecting_frame(
+                    f"{name.upper()} @ {ip}\nHTML5 MJPEG INGEST (NO IE PLUGIN NEEDED)\n"
+                    f"PROBING {self._snapshot_path_label(url)}",
+                    status_color=(0, 200, 255),
+                )
+            if not self._consume_mjpeg_stream(url):
+                continue
+
+            # Live: keep reading, reconnecting through temporary dropouts.
+            backoff = 1.0
+            while self._running:
+                if self._consume_mjpeg_stream(url, first_frame_timeout=8.0):
+                    backoff = 1.0
+                    continue
+                if not self._running:
+                    break
+                self.connection_status = "reconnecting"
+                with self._lock:
+                    self._latest_jpeg = self._draw_connecting_frame(
+                        f"{name.upper()} @ {ip}\nMJPEG STREAM LOST - RECONNECTING...\n"
+                        f"{self._snapshot_path_label(url)}",
+                        status_color=(255, 159, 10),
+                    )
+                time.sleep(backoff)
+                backoff = min(5.0, backoff * 1.5)
+            return True
+        return False
+
+    def _legacy_hint(self) -> str:
+        """Vendor-specific guidance shown on the HUD when a camera has not produced frames."""
+        vendor = (self.camera_info.get("vendor") or "").strip().lower()
+        if vendor in ("hikvision", "hikvision_dvr"):
+            return "NO IE PLUGIN NEEDED (WebComponents.exe)\nOMNISIGHT USES ISAPI / RTSP DIRECTLY"
+        if vendor in ("dahua", "amcrest"):
+            return "NO IE PLUGIN NEEDED (webplugin.exe)\nOMNISIGHT USES CGI / RTSP DIRECTLY"
+        if vendor in ("legacy_activex", "activex", "legacy_ie"):
+            return "NO ACTIVEX NEEDED - POLLING RAW JPEG ENDPOINTS"
+        return ""
 
     def _http_snapshot_polling_loop(self):
         """Polls camera HTTP snapshot endpoint with Digest/Basic auth support and auto-reconnect."""
@@ -505,67 +983,163 @@ class CameraStreamSession:
                 snapshot_url = f"http://{ip}:8080/shot.jpg"
             else:
                 snapshot_url = f"http://{ip}/snapshot.jpg"
+            self.camera_info["snapshot_url"] = snapshot_url
 
-        if not snapshot_url:
+        snapshot_candidates = self._snapshot_url_candidates()
+        if not snapshot_candidates:
             self._simulation_loop()
             return
 
+        # Credentials embedded in the URL take precedence
         try:
-            parsed = urllib.parse.urlparse(snapshot_url)
+            parsed = urllib.parse.urlparse(snapshot_candidates[0])
             if parsed.username:
                 username = parsed.username
             if parsed.password:
                 password = parsed.password
-            
-            port_str = f":{parsed.port}" if parsed.port and parsed.port != 80 else ""
-            clean_host = parsed.hostname or ip
-            clean_path = parsed.path or "/snapshot.jpg"
-            clean_url = f"{parsed.scheme or 'http'}://{clean_host}{port_str}{clean_path}"
         except Exception:
-            clean_url = re.sub(r'://[^@]+@', '://', snapshot_url)
+            pass
 
-        password_mgr = urllib.request.HTTPPasswordMgrWithDefaultRealm()
-        if username:
-            password_mgr.add_password(None, clean_url, username, password or "")
-            if ip:
-                password_mgr.add_password(None, f"http://{ip}/", username, password or "")
-                password_mgr.add_password(None, f"http://{ip}:80/", username, password or "")
-                password_mgr.add_password(None, f"http://{ip}:8080/", username, password or "")
-
-        auth_handler = urllib.request.HTTPDigestAuthHandler(password_mgr)
-        basic_handler = urllib.request.HTTPBasicAuthHandler(password_mgr)
-        opener = urllib.request.build_opener(auth_handler, basic_handler)
+        def build_opener(url: str):
+            pwd_mgr = _PasswordMgr(self, url)
+            auth_handler = urllib.request.HTTPDigestAuthHandler(pwd_mgr)
+            basic_handler = urllib.request.HTTPBasicAuthHandler(pwd_mgr)
+            return urllib.request.build_opener(auth_handler, basic_handler)
 
         target_fps = max(2, min(20, self.camera_info.get("fps", 10)))
         interval = 1.0 / target_fps
+
+        self.connection_status = "connecting"
+        self.last_error = ""
+
+        candidate_idx = 0
         consecutive_fails = 0
+        # Persist the discovered endpoint so the dashboard (and next reboot) use it too.
+        try:
+            if not self.camera_info.get("snapshot_url") and snapshot_candidates:
+                self.camera_info["snapshot_url"] = snapshot_candidates[0]
+        except Exception:
+            pass
 
         while self._running:
             t0 = time.time()
+            target = snapshot_candidates[candidate_idx % len(snapshot_candidates)]
             try:
+                opener = build_opener(target)
+                clean_url = self._strip_credentials(target)
                 sep = "&" if "?" in clean_url else "?"
                 req_url = f"{clean_url}{sep}t={int(t0 * 1000)}"
                 req = urllib.request.Request(req_url, headers={"User-Agent": "OmniSight/1.0"})
                 with opener.open(req, timeout=3.5) as resp:
-                    jpeg_bytes = resp.read()
+                    jpeg_bytes = self._read_single_jpeg(resp)
                     if jpeg_bytes and len(jpeg_bytes) > 200:
                         with self._lock:
                             self._latest_jpeg = jpeg_bytes
                             self._last_frame_time = time.time()
                             self.connection_status = "streaming"
+                            self.last_error = ""
                         consecutive_fails = 0
-            except Exception:
+                        if self._working_snapshot_url != target:
+                            self._working_snapshot_url = target
+                            self.camera_info["snapshot_url"] = target
+            except Exception as exc:
                 consecutive_fails += 1
-                if consecutive_fails >= 3:
+                self.last_error = str(exc) or exc.__class__.__name__
+
+                # Snapshot endpoint not found yet: walk the candidate list quickly.
+                if not self._working_snapshot_url and len(snapshot_candidates) > 1:
+                    candidate_idx += 1
+                    self.connection_status = "connecting"
+                    note = "AUTO-DETECTING SNAPSHOT ENDPOINT"
+                elif consecutive_fails >= 3:
                     self.connection_status = "reconnecting"
-                    err_text = f"{self.camera_info.get('name', 'CAMERA')} @ {ip}\nAWAITING PASSWORD IN SETTINGS" if not password else f"CONNECTING TO {ip}...\nCHECK PASSWORD / NETWORK"
+                    note = "CHECK PASSWORD / NETWORK"
+                else:
+                    note = ""
+
+                if note:
+                    if self._working_snapshot_url:
+                        note = f"RETRYING {self._snapshot_path_label(self._working_snapshot_url)}"
+                    hint = self._legacy_hint()
+                    err_text = (
+                        f"{self.camera_info.get('name', 'CAMERA')} @ {ip}\n{note}"
+                        + (f"\n{hint}" if hint else "")
+                    )
                     with self._lock:
                         self._latest_jpeg = self._draw_connecting_frame(err_text)
-                    time.sleep(1.0)
+                    time.sleep(0.5 if not self._working_snapshot_url else 1.0)
 
             elapsed = time.time() - t0
             sleep_time = max(0.04, interval - elapsed)
             time.sleep(sleep_time)
+
+    @staticmethod
+    def _strip_credentials(url: str) -> str:
+        """Removes user:pass@ from a URL (urllib handles auth via its password manager)."""
+        return re.sub(r"://[^/@]+@", "://", url)
+
+    def _origin_of(self, url: str) -> str:
+        """Returns scheme://host[:port] for a URL, so credentials can be scoped to it."""
+        parsed = urllib.parse.urlparse(self._strip_credentials(url))
+        netloc = parsed.netloc or (self.camera_info.get("ip") or "")
+        return f"{parsed.scheme or 'http'}://{netloc}"
+
+    @staticmethod
+    def _snapshot_path_label(url: str) -> str:
+        try:
+            return urllib.parse.urlparse(url).path.upper().lstrip("/")[:40] or "SNAPSHOT"
+        except Exception:
+            return "SNAPSHOT"
+
+    def discover_snapshot_endpoint(self, timeout: float = 3.0) -> Optional[str]:
+        """Actively probes every known still-image endpoint and returns the first that works.
+
+        This is what lets an Internet-Explorer/ActiveX-only camera stream into a
+        modern browser: we find the raw JPEG the camera serves and poll it.
+        """
+        for candidate in self._snapshot_url_candidates():
+            try:
+                opener = urllib.request.build_opener(
+                    urllib.request.HTTPBasicAuthHandler(_PasswordMgr(self, candidate)),
+                    urllib.request.HTTPDigestAuthHandler(_PasswordMgr(self, candidate)),
+                )
+                req = urllib.request.Request(
+                    self._strip_credentials(candidate),
+                    headers={"User-Agent": "OmniSight/1.0"},
+                )
+                with opener.open(req, timeout=timeout) as resp:
+                    frame = self._read_single_jpeg(resp)
+                    if frame and len(frame) > 200 and frame.startswith(b"\xff\xd8"):
+                        self._working_snapshot_url = candidate
+                        self.camera_info["snapshot_url"] = candidate
+                        return candidate
+            except Exception:
+                continue
+        return None
+
+    @staticmethod
+    def _read_single_jpeg(resp) -> bytes:
+        """Reads exactly one JPEG frame from an HTTP response.
+
+        Works for both plain still-image CGIs and endless multipart/x-mixed-replace
+        MJPEG feeds, where a naive resp.read() would block forever.
+        """
+        buffer = bytearray()
+        reader = getattr(resp, "read1", None) or resp.read
+        deadline = time.time() + 3.5
+        while len(buffer) < 4 * 1024 * 1024 and time.time() < deadline:
+            chunk = reader(65536)
+            if not chunk:
+                break
+            buffer.extend(chunk)
+            start = buffer.find(b"\xff\xd8")
+            if start != -1:
+                end = buffer.find(b"\xff\xd9", start + 2)
+                if end != -1:
+                    return bytes(buffer[start:end + 2])
+        # No complete frame boundary found: hand back whatever looks like image data.
+        start = buffer.find(b"\xff\xd8")
+        return bytes(buffer[start:]) if start != -1 else bytes(buffer)
 
     def _draw_connecting_frame(self, message: str, status_color=(255, 159, 10)) -> bytes:
         """Renders an Apple Cupertino frosted-dark HUD status frame."""
@@ -822,28 +1396,53 @@ class CameraStreamSession:
 class StreamManager:
     """Manages collection of active camera stream sessions."""
 
+    #: Camera fields that change how a stream is ingested. A change in any of
+    #: these requires the running worker to be restarted with the new config.
+    CONFIG_FINGERPRINT_FIELDS = (
+        "name", "vendor", "ip", "port", "username", "password",
+        "stream_url", "sub_stream_url", "snapshot_url", "channel",
+        "is_simulated", "legacy_polling", "fps", "talkback_port",
+    )
+
     def __init__(self, config_manager):
         self.config_manager = config_manager
         self.sessions: Dict[str, CameraStreamSession] = {}
+        self._fingerprints: Dict[str, tuple] = {}
         self._lock = threading.Lock()
         self._sync_sessions()
+
+    @classmethod
+    def _fingerprint(cls, cam: Dict[str, Any]) -> tuple:
+        return tuple(str(cam.get(field, "")) for field in cls.CONFIG_FINGERPRINT_FIELDS)
 
     def _sync_sessions(self):
         with self._lock:
             cameras = self.config_manager.get_all_cameras()
-            existing_ids = set(self.sessions.keys())
             current_ids = {c["id"] for c in cameras}
 
-            for cid in existing_ids - current_ids:
+            for cid in set(self.sessions.keys()) - current_ids:
                 self.sessions[cid].stop()
                 del self.sessions[cid]
+                self._fingerprints.pop(cid, None)
 
             for c in cameras:
                 cid = c["id"]
-                if cid not in self.sessions:
+                fingerprint = self._fingerprint(c)
+                existing = self.sessions.get(cid)
+
+                if existing is None:
                     session = CameraStreamSession(c)
                     session.start()
                     self.sessions[cid] = session
+                elif self._fingerprints.get(cid) != fingerprint:
+                    # Camera was edited (credentials, IP, source URL, simulator flag...):
+                    # restart the worker so the new settings actually take effect.
+                    existing.stop()
+                    session = CameraStreamSession(c)
+                    session.start()
+                    self.sessions[cid] = session
+
+                self._fingerprints[cid] = fingerprint
 
     def get_session(self, camera_id: str) -> Optional[CameraStreamSession]:
         with self._lock:
@@ -854,6 +1453,7 @@ class StreamManager:
                 session = CameraStreamSession(cam)
                 session.start()
                 self.sessions[camera_id] = session
+                self._fingerprints[camera_id] = self._fingerprint(cam)
                 return session
             return None
 

@@ -6,6 +6,7 @@ Vivotek, Foscam, Wyze, Eufy, Tuya, Yoosee, V380, V360, SriHome, ZOSI/Lorex,
 UniFi, D-Link, Milesight, Mobotix, ESP32-CAM, Raspberry Pi, Webcams, and ONVIF.
 """
 
+import urllib.parse
 from typing import Dict, Any, Optional, List
 
 VENDOR_PRESETS: Dict[str, Dict[str, Any]] = {
@@ -26,6 +27,9 @@ VENDOR_PRESETS: Dict[str, Dict[str, Any]] = {
         "snapshot_url": "http://{username}:{password}@{ip}:{port}/ISAPI/Streaming/channels/{channel}01/picture",
         "ptz_supported": True,
         "quirks": [
+            "No WebComponents.exe needed! The camera's own web UI asks for the Hikvision ActiveX plugin in Internet Explorer, but OmniSight talks to ISAPI / PSIA / RTSP directly.",
+            "Live video can also be pulled plugin-free from /ISAPI/Streaming/channels/101/httpPreview (multipart MJPEG) - OmniSight uses it automatically when RTSP is unavailable.",
+            "If a plugin-free URL is needed for testing, open http://<camera-ip>/ISAPI/Streaming/channels/101/picture in any browser and sign in - you get a still image, no plugin.",
             "ONVIF is often disabled by default on newer firmware. Enable it in Configuration > Network > Advanced Settings > Integration Protocol.",
             "Create a dedicated ONVIF user with 'Digest/basic' authentication, not just Digest.",
             "Channel number is typically 1 (becomes 101 for main stream, 102 for sub stream)."
@@ -629,6 +633,8 @@ VENDOR_PRESETS: Dict[str, Dict[str, Any]] = {
         "snapshot_url": "http://{username}:{password}@{ip}:{port}/ISAPI/Streaming/channels/{channel}01/picture",
         "ptz_supported": True,
         "quirks": [
+            "No WebComponents.exe needed - OmniSight uses the DVR's ISAPI / PSIA / RTSP interfaces directly instead of the IE ActiveX plugin.",
+            "Live MJPEG without any plugin: /ISAPI/Streaming/channels/101/httpPreview (channel 101 = BNC 1).",
             "Hikvision DVR / TurboHD digitizes analog coaxial BNC cameras.",
             "Channel 1 BNC = 101, Channel 2 BNC = 201, Channel 3 = 301, Channel 4 = 401, etc.",
             "Sub-stream for mobile / multi-grid uses suffix 02 (e.g., 102, 202, 302)."
@@ -785,15 +791,18 @@ VENDOR_PRESETS: Dict[str, Dict[str, Any]] = {
         "category": "generic",
         "default_ports": {"http": 80, "rtsp": 554},
         "default_credentials": {"username": "admin", "password": ""},
-        "rtsp_patterns": {
-            "main": "rtsp://{username}:{password}@{ip}:{port}/live/ch0",
-        },
-        "snapshot_url": "http://{ip}:{port}/snapshot.jpg",
+        # These cameras have no dependable RTSP path (their video only ever came out
+        # through an ActiveX control), so still-image polling is the primary source.
+        "snapshot_first": True,
+        "rtsp_patterns": {},
+        "snapshot_url": "http://{ip}:{port}/webcapture.jpg?command=snap&channel={channel}",
         "ptz_supported": True,
         "quirks": [
-            "Bypasses ActiveX! OmniSight polls the camera's raw snapshot endpoint at 15 FPS, so you can view it in Chrome/Edge/Firefox without Internet Explorer."
+            "Bypasses ActiveX! OmniSight finds the camera's raw JPEG endpoint and polls it in HTML5, so it works in Chrome/Edge/Firefox/Safari with no Internet Explorer.",
+            "No working RTSP path is assumed - if the camera does offer RTSP, run the Universal Connection Prober and it will be used instead.",
+            "If the video does not appear immediately, OmniSight is auto-detecting the snapshot endpoint (webcapture.jpg, snapshot.jpg, ISAPI, ONVIF, CGI...)."
         ],
-        "default_channel": 0
+        "default_channel": 1
     },
     "generic_onvif": {
         "id": "generic_onvif",
@@ -929,16 +938,24 @@ COMMON_RTSP_CANDIDATE_PATHS = [
 ]
 
 COMMON_SNAPSHOT_CANDIDATE_PATHS = [
+    # IE / ActiveX-era endpoints first: these are the ones vendor web plugins used
+    "/webcapture.jpg?command=snap&channel=1",
     "/ISAPI/Streaming/channels/101/picture",
     "/cgi-bin/snapshot.cgi?channel=1",
     "/snapshot.jpg",
+    "/onvif-http/snapshot?Profile_1",
+    "/cgi-bin/viewer/video.jpg?channel=1",
     "/jpg/image.jpg",
     "/cgi-bin/api.cgi?cmd=Snap&channel=01",
     "/tmpfs/auto.jpg",
     "/oneshotimage.jpg",
     "/snap.jpg",
     "/image/jpeg.cgi",
+    "/videostream.cgi",
+    "/cgi-bin/CGIProxy.fcgi?cmd=snapPicture2",
+    "/axis-cgi/jpg/image.cgi",
     "/capture",
+    "/shot.jpg",
     "/?action=snapshot"
 ]
 
@@ -962,6 +979,30 @@ def build_stream_url(
         return f"webcam://{custom_path or ip or '0'}"
     if preset_id == "browser_node":
         return f"node://{custom_path or ip or 'local'}"
+
+    # Snapshot-first cameras (IE/ActiveX-era hardware) have no dependable RTSP path:
+    # their usable source is the raw JPEG endpoint.
+    if preset.get("snapshot_first"):
+        snapshot_pattern = preset.get("snapshot_url") or "/snapshot.jpg"
+        http_port = port
+        if snapshot_pattern.startswith(("http://", "https://")):
+            try:
+                pattern_port = urllib.parse.urlparse(snapshot_pattern).port
+            except ValueError:
+                pattern_port = None
+            if pattern_port:
+                http_port = pattern_port
+        if not http_port or int(http_port) in (554, 8554, 7447, 10554):
+            http_port = preset.get("default_ports", {}).get("http", 80)
+        return (
+            snapshot_pattern
+            .replace("{ip}", ip or "")
+            .replace("{port}", str(http_port or 80))
+            .replace("{username}", username or "")
+            .replace("{password}", password or "")
+            .replace("{channel_index}", str(max(0, int(channel or 1) - 1)))
+            .replace("{channel}", str(channel or 1))
+        )
 
     # Determine default port
     if port is None or port == 0:

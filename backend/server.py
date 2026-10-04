@@ -324,7 +324,12 @@ class OmniSightHandler(BaseHTTPRequestHandler):
 
         # API: Get all cameras
         if path == "/api/cameras":
-            cameras = config_manager.get_all_cameras()
+            cameras = []
+            for cam in config_manager.get_all_cameras():
+                enriched = dict(cam)
+                session = stream_manager.get_session(cam["id"])
+                enriched["live_status"] = session.get_status() if session else None
+                cameras.append(enriched)
             layout = config_manager.get_layout()
             groups = config_manager.get_groups()
             self.send_json({
@@ -339,9 +344,22 @@ class OmniSightHandler(BaseHTTPRequestHandler):
             cam_id = path.split("/")[3]
             cam = config_manager.get_camera(cam_id)
             if cam:
-                self.send_json(cam)
+                enriched = dict(cam)
+                session = stream_manager.get_session(cam_id)
+                enriched["live_status"] = session.get_status() if session else None
+                self.send_json(enriched)
             else:
                 self.send_json({"error": "Camera not found"}, 404)
+            return
+
+        # API: Live status of a single camera (/api/cameras/<id>/status)
+        if path.startswith("/api/cameras/") and path.endswith("/status"):
+            cam_id = path.split("/")[3]
+            session = stream_manager.get_session(cam_id)
+            if not session:
+                self.send_json({"error": "Camera not found"}, 404)
+                return
+            self.send_json(session.get_status())
             return
 
         # API: Stream Camera (MJPEG boundary stream)
@@ -362,11 +380,16 @@ class OmniSightHandler(BaseHTTPRequestHandler):
             if not session:
                 self.send_json({"error": "Camera not found"}, 404)
                 return
+            live = session.get_status()
             frame = session.get_latest_frame()
             self.send_response(200)
             self.send_header("Content-Type", "image/jpeg")
             self.send_header("Content-Length", str(len(frame)))
             self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            # Lets the dashboard tell "real frames" apart from the offline HUD placeholder.
+            self.send_header("X-Camera-Status", live["status"])
+            self.send_header("X-Camera-Online", "true" if live["online"] else "false")
+            self.send_header("Access-Control-Expose-Headers", "X-Camera-Status, X-Camera-Online")
             self.end_headers()
             self.wfile.write(frame)
             return
