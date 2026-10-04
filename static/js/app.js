@@ -153,8 +153,12 @@ const BUILTIN_PRESETS = {
       "sub": "rtsp://{username}:{password}@{ip}:{port}/Streaming/Channels/{channel}02"
     },
     "snapshot_url": "http://{username}:{password}@{ip}:{port}/ISAPI/Streaming/channels/{channel}01/picture",
+    // Plugin-free live MJPEG (what WebComponents.exe consumed in IE)
+    "mjpeg_url": "http://{username}:{password}@{ip}:{port}/ISAPI/Streaming/channels/{channel}01/httpPreview",
     "ptz_supported": true,
     "quirks": [
+      "No WebComponents.exe needed! The camera's own web UI asks for that Hikvision IE plugin, but OmniSight uses ISAPI / PSIA / RTSP directly.",
+      "Live MJPEG without any plugin: /ISAPI/Streaming/channels/101/httpPreview - used automatically when RTSP is unavailable.",
       "ONVIF is often disabled by default on newer firmware. Enable it in Configuration > Network > Advanced Settings > Integration Protocol.",
       "Create a dedicated ONVIF user with 'Digest/basic' authentication, not just Digest.",
       "Channel number is typically 1 (becomes 101 for main stream, 102 for sub stream)."
@@ -1151,15 +1155,17 @@ const BUILTIN_PRESETS = {
       "username": "admin",
       "password": ""
     },
-    "rtsp_patterns": {
-      "main": "rtsp://{username}:{password}@{ip}:{port}/live/ch0"
-    },
-    "snapshot_url": "http://{ip}:{port}/snapshot.jpg",
+    // ActiveX-era cameras have no dependable RTSP path - poll the raw JPEG instead.
+    "snapshot_first": true,
+    "rtsp_patterns": {},
+    "snapshot_url": "http://{ip}:{port}/webcapture.jpg?command=snap&channel={channel}",
     "ptz_supported": true,
     "quirks": [
-      "Bypasses ActiveX! OmniSight polls the camera's raw snapshot endpoint at 15 FPS, so you can view it in Chrome/Edge/Firefox without Internet Explorer."
+      "Bypasses ActiveX! OmniSight finds the camera's raw JPEG endpoint and polls it in HTML5 - no Internet Explorer needed.",
+      "The snapshot endpoint is auto-detected (webcapture.jpg, snapshot.jpg, ISAPI, ONVIF, CGI...).",
+      "If the camera does offer RTSP, run the Universal Connection Prober and that will be used instead."
     ],
-    "default_channel": 0
+    "default_channel": 1
   },
   "generic_onvif": {
     "id": "generic_onvif",
@@ -1966,7 +1972,7 @@ function renderGrid() {
     card.innerHTML = `
       <div class="card-header">
         <div class="card-title-group">
-          <span class="cam-status-dot"></span>
+          <span class="cam-status-dot" id="statusDot-${safeId}" title="Live camera status"></span>
           <span class="cam-name" title="${safeName}">${safeName}</span>
           <span class="vendor-tag ${vendorClass}">${escapeHtml(cam.vendor || "CAM")}</span>
           ${isLegacy ? `<span class="badge-legacy" title="ActiveX bypassed: HTML5 snapshot polling">NO-IE</span>` : ''}
@@ -1990,9 +1996,55 @@ function renderGrid() {
     `;
     cameraGrid.appendChild(card);
 
+    // Reflect the real ingestion state instead of always claiming "online"
+    if (cam.live_status) applyLiveCameraStatus(cam.id, cam.live_status);
+    else setCameraStatusDot(cam.id, "connecting", "Waiting for NVR telemetry...");
+
     // Setup Video Player for this Camera
     setupCameraPlayer(cam);
   });
+
+  refreshLiveStatuses();
+}
+
+// --- Live camera status (online / reconnecting / offline) ---
+const STATUS_LABELS = {
+  streaming: ["online", "Live stream healthy"],
+  connecting: ["connecting", "Connecting to camera..."],
+  reconnecting: ["connecting", "Camera unreachable - retrying"],
+  idle: ["connecting", "Session starting..."],
+  error: ["offline", "Camera failed - check credentials / network"]
+};
+
+function setCameraStatusDot(camId, status, detail = "") {
+  const dot = document.getElementById(`statusDot-${camId}`);
+  if (!dot) return;
+  const [cls, defaultLabel] = STATUS_LABELS[status] || ["connecting", "Status unknown"];
+  dot.classList.remove("online", "connecting", "offline");
+  dot.classList.add(cls);
+  dot.title = detail || defaultLabel;
+}
+
+function applyLiveCameraStatus(camId, live) {
+  if (!live) return;
+  setCameraStatusDot(camId, live.status, live.last_error || "");
+}
+
+// Poll the NVR for real per-camera state without re-rendering the video grid.
+async function refreshLiveStatuses() {
+  if (!localApiAvailable) return;
+  try {
+    const res = await authFetch("/api/cameras");
+    if (!res.ok) return;
+    const data = await res.json();
+    (data.cameras || []).forEach(cam => {
+      if (cam.live_status) applyLiveCameraStatus(cam.id, cam.live_status);
+    });
+  } catch (err) {}
+}
+
+if (typeof window !== "undefined") {
+  window.setInterval(refreshLiveStatuses, 5000);
 }
 
 // Setup Camera Video Stream Player
@@ -2042,8 +2094,23 @@ function setupCameraPlayer(cam) {
     img.alt = cam.name;
     container.insertBefore(img, container.firstChild);
 
+    // Preferred path: let the NVR find and fetch the camera's still-image endpoint.
+    // This handles endpoint auto-detection, Digest/Basic auth, and avoids the
+    // mixed-content and CORS restrictions that block direct browser -> camera calls.
+    if (localApiAvailable) {
+      const proxyUrl = `/api/cameras/${cam.id}/snapshot?token=${encodeURIComponent(authToken)}`;
+      img.src = `${proxyUrl}&t=${Date.now()}`;
+      pollingIntervals[cam.id] = setInterval(() => {
+        img.src = `${proxyUrl}&t=${Date.now()}`;
+      }, 500);
+      return;
+    }
+
+    // GitHub Pages mode: no backend, poll the camera directly from the browser.
     let snapUrl = "";
-    if (cam.vendor === "hikvision" || cam.vendor === "hikvision_dvr") {
+    if (cam.vendor === "legacy_activex" || cam.vendor === "xiongmai" || cam.vendor === "gatocam") {
+      snapUrl = `http://${cam.ip}/webcapture.jpg?command=snap&channel=${cam.channel || 1}`;
+    } else if (cam.vendor === "hikvision" || cam.vendor === "hikvision_dvr") {
       snapUrl = `http://${cam.ip}/ISAPI/Streaming/channels/${cam.channel || 1}01/picture`;
     } else if (cam.vendor === "dahua" || cam.vendor === "amcrest") {
       snapUrl = `http://${cam.ip}/cgi-bin/snapshot.cgi?channel=${cam.channel || 1}`;
@@ -2055,13 +2122,25 @@ function setupCameraPlayer(cam) {
       snapUrl = `http://${cam.ip}/snapshot.jpg`;
     }
 
+    const directCandidates = [
+      snapUrl,
+      `http://${cam.ip}/webcapture.jpg?command=snap&channel=${cam.channel || 1}`,
+      `http://${cam.ip}/snapshot.jpg`
+    ];
+    let candidateIdx = 0;
+
     function pollFrame() {
       const testImg = new Image();
       testImg.onload = () => { img.src = testImg.src; };
       testImg.onerror = () => {
+        if (candidateIdx < directCandidates.length - 1) {
+          candidateIdx += 1;
+          pollFrame();
+          return;
+        }
         drawTacticalFallback(container, cam, "ACTIVE POLLING • MIXED CONTENT RESTRICTION");
       };
-      testImg.src = `${snapUrl}?t=${Date.now()}`;
+      testImg.src = `${directCandidates[candidateIdx]}${directCandidates[candidateIdx].includes("?") ? "&" : "?"}t=${Date.now()}`;
     }
 
     pollFrame();
@@ -2769,7 +2848,22 @@ function autoGenerateUrl() {
   const preset = vendorPresets[vendor] || BUILTIN_PRESETS[vendor] || BUILTIN_PRESETS["generic_rtsp"];
   const creds = username && password ? `${username}:${password}@` : (username ? `${username}@` : "");
   const snapPattern = preset?.snapshot_pattern || preset?.snapshot_url;
-  
+
+  // IE/ActiveX-era cameras: their usable source is the raw JPEG endpoint, not RTSP.
+  if (preset?.snapshot_first && snapPattern) {
+    const httpPort = (port === 554 || port === 8554) ? (preset.default_ports?.http || 80) : port;
+    document.getElementById("camStreamUrl").value = snapPattern
+      .replace("{username}:{password}@", creds)
+      .replace("{username}", username || "")
+      .replace("{password}", password || "")
+      .replace("{ip}", ip)
+      .replace("{port}", httpPort)
+      .replace("{channel_index}", String(Math.max(0, parseInt(channel || 1) - 1)))
+      .replace("{channel}", channel);
+    document.getElementById("camLegacyPolling").checked = true;
+    return;
+  }
+
   if (document.getElementById("camLegacyPolling").checked && snapPattern) {
     const snapUrl = snapPattern
       .replace("{username}:{password}@", creds)
