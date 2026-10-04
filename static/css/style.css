@@ -1448,3 +1448,83 @@ input:focus, select:focus {
   flex-shrink: 0;
 }
 
+/* Universal Camera Prober & Auto-Detection */
+.probe-section {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin: 10px 0 14px;
+}
+
+.probe-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--text-secondary);
+}
+
+.probe-chip.active {
+  background: rgba(52, 199, 89, 0.15);
+  border-color: rgba(52, 199, 89, 0.35);
+  color: #34c759;
+}
+
+.probe-chip.codec {
+  background: rgba(0, 122, 255, 0.15);
+  border-color: rgba(0, 122, 255, 0.35);
+  color: #5ac8fa;
+}
+
+.probe-chip.warning {
+  background: rgba(255, 149, 0, 0.15);
+  border-color: rgba(255, 149, 0, 0.35);
+  color: #ff9500;
+}
+
+.probe-chip.error {
+  background: rgba(255, 59, 48, 0.15);
+  border-color: rgba(255, 59, 48, 0.35);
+  color: #ff3b30;
+}
+
+select optgroup {
+  background: #181a20;
+  color: #8e8e93;
+  font-weight: 700;
+  font-size: 11px;
+  padding: 6px 4px;
+}
+
+select option {
+  background: #121418;
+  color: #ffffff;
+  font-weight: normal;
+  font-size: 12px;
+  padding: 4px;
+}
+
+/* Universal Vendor Badges */
+.vendor-tag.amcrest { background: rgba(255, 149, 0, 0.15); color: #ff9500; border: 1px solid rgba(255, 149, 0, 0.3); }
+.vendor-tag.uniview { background: rgba(52, 199, 89, 0.15); color: #34c759; border: 1px solid rgba(52, 199, 89, 0.3); }
+.vendor-tag.axis { background: rgba(255, 204, 0, 0.15); color: #ffcc00; border: 1px solid rgba(255, 204, 0, 0.3); }
+.vendor-tag.hanwha { background: rgba(0, 122, 255, 0.15); color: #5ac8fa; border: 1px solid rgba(0, 122, 255, 0.3); }
+.vendor-tag.bosch { background: rgba(255, 45, 85, 0.15); color: #ff2d55; border: 1px solid rgba(255, 45, 85, 0.3); }
+.vendor-tag.reolink { background: rgba(90, 200, 250, 0.15); color: #5ac8fa; border: 1px solid rgba(90, 200, 250, 0.3); }
+.vendor-tag.foscam { background: rgba(175, 82, 222, 0.15); color: #af52de; border: 1px solid rgba(175, 82, 222, 0.3); }
+.vendor-tag.wyze { background: rgba(0, 199, 190, 0.15); color: #00c7be; border: 1px solid rgba(0, 199, 190, 0.3); }
+.vendor-tag.eufy { background: rgba(48, 176, 199, 0.15); color: #30b0c7; border: 1px solid rgba(48, 176, 199, 0.3); }
+.vendor-tag.tuya { background: rgba(255, 149, 0, 0.15); color: #ff9500; border: 1px solid rgba(255, 149, 0, 0.3); }
+.vendor-tag.unifi { background: rgba(0, 122, 255, 0.15); color: #007aff; border: 1px solid rgba(0, 122, 255, 0.3); }
+.vendor-tag.esp32_cam { background: rgba(255, 59, 48, 0.15); color: #ff3b30; border: 1px solid rgba(255, 59, 48, 0.3); }
+.vendor-tag.raspberry_pi { background: rgba(255, 45, 85, 0.15); color: #ff2d55; border: 1px solid rgba(255, 45, 85, 0.3); }
+.vendor-tag.usb_webcam { background: rgba(52, 199, 89, 0.15); color: #34c759; border: 1px solid rgba(52, 199, 89, 0.3); }
+.vendor-tag.browser_node { background: rgba(191, 90, 242, 0.15); color: #bf5af2; border: 1px solid rgba(191, 90, 242, 0.3); }
+
+

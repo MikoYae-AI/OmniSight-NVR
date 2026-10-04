@@ -110,23 +110,25 @@ docker compose up -d
 
 ---
 
-## 📋 Camera Compatibility & RTSP Cheat Sheet
+## 📋 Universal Camera Compatibility Matrix (40+ Brands & Standards)
 
-| Brand / Chipset | Signature Ports | Default RTSP URL Format | Default User / Pass |
+OmniSight-NVR supports virtually every surveillance camera and video source on the market:
+
+| Category | Brands / Standards Supported | Protocols & Detection | Signature Ports |
 |---|---|---|---|
-| **Hikvision** (DS-2CD, ColorVu) | 554, 8000, 80 | `rtsp://admin:pass@ip:554/Streaming/Channels/101` | `admin` / set on setup |
-| **Dahua & Imou** (IPC, WizSense) | 554, 37777, 80 | `rtsp://admin:pass@ip:554/cam/realmonitor?channel=1&subtype=0` | `admin` / `admin` |
-| **Xiongmai (XM)** (Generic Chinese) | 554, 34567, 8899 | `rtsp://admin:pass@ip:554/live/ch0` | `admin` / (blank) |
-| **TP-Link Tapo** (C200, C310) | 554, 2020 | `rtsp://user:pass@ip:554/stream1` | Configured in App |
-| **Reolink** (RLC, Duo, TrackMix) | 554, 8000 | `rtsp://admin:pass@ip:554/h264Preview_01_main` | `admin` / (blank) |
-| **Yoosee / Cooau** | 554, 5000 | `rtsp://admin:pass@ip:554/onvif1` | `admin` / `123456` |
-| **V380 / V380 Pro** | 554, 8899 | `rtsp://admin:pass@ip:554/live/ch0` | `admin` / (blank) |
-| **ESP32-CAM / IP Webcam** | 80, 8080 | `http://ip:port/stream` or `/mjpeg` | None |
+| **Mainstream Commercial** | **Hikvision**, **Dahua**, **Amcrest**, **Uniview (UNV)**, **Axis (VAPIX)**, **Hanwha (Wisenet)**, **Bosch**, **Sony (IPELA)**, **Panasonic**, **Vivotek** | RTSP TCP/UDP, ISAPI, CGI, ONVIF Profile S/G/T | 554, 80, 8000, 37777 |
+| **Consumer Smart Security** | **TP-Link Tapo & Kasa**, **Reolink**, **Wyze**, **Eufy**, **Foscam**, **Tuya / Smart Life**, **Yoosee**, **V380 Pro**, **V360 Pro**, **SriHome**, **UniFi Protect**, **D-Link**, **Milesight**, **Mobotix** | RTSP, ONVIF, Two-Way Talkback, P2P/NAS LAN RTSP | 554, 2020, 8000, 8899, 7447 |
+| **CCTV DVR / XVR / NVR** | **Hikvision TurboHD**, **Dahua XVR**, **Amcrest DVR**, **Uniview NVR**, **Xiongmai CMS DVR**, **ZOSI / Lorex** | Multi-channel BNC Coaxial Bulk Ingestion | 554, 34567, 37777 |
+| **Chinese White-Label OEM** | **Xiongmai (XM / Sofia)**, **GatoCam**, **Anran**, **Jovision**, **TVT**, **Tiandy**, **Sunell**, **Longse**, **Cantonk**, **Wansview**, **SV3C**, **Dericam**, **Ctronics** | HiSilicon/Goke/XM530, Zero-IE Snapshot Polling, OpenIPC | 554, 34567, 8899 |
+| **DIY & Embedded** | **ESP32-CAM**, **Raspberry Pi (libcamera / mjpg-streamer)**, **IP Webcam (Android)** | HTTP Multipart MJPEG, HLS, WebRTC | 80, 81, 8080, 4747 |
+| **System Webcams & Nodes** | **Local USB Webcams (DirectShow / V4L2)**, **📱 Browser Camera Nodes** | USB UVC, Browser `getUserMedia` HTML5 Ingestion | `webcam://0`, `node://id` |
+| **Generic Protocols** | **ONVIF Profile S**, **Custom RTSP (TCP & UDP)**, **RTMP Live Streams**, **HTTP HLS (.m3u8)** | FFmpeg Multiplexer with Auto-Transport Fallback | Custom |
 
-### Critical Brand Quirks:
-- **Hikvision**: ONVIF is often disabled out-of-the-box. Go to *Configuration → Network → Advanced Settings → Integration Protocol*, enable ONVIF, and add an ONVIF user with **Digest/Basic** authentication.
-- **Xiongmai / Chinese Cameras**: These chipsets communicate on TCP port **34567** (NetSurveillance CMS port). If the RTSP stream URL fails, the camera's media port is usually open on 34567.
-- **Tapo**: Do not use your TP-Link cloud account password! Create a dedicated local camera account inside the Tapo mobile app under *Device Settings → Advanced Settings → Camera Account*.
+### ⚡ Universal Connection Prober & Diagnostic
+OmniSight includes an intelligent low-latency connection prober (`POST /api/cameras/probe`). It issues raw TCP RTSP `DESCRIBE` handshakes, tests snapshot URIs, extracts SDP video/audio codecs (H.264, H.265/HEVC, AAC), determines network latency, and automatically recommends the optimal connection mode for your camera.
+
+### 📱 Browser Camera Node (Stream Phone or Laptop into Matrix)
+Transform any smartphone, iPad, tablet, or laptop into a live wireless CCTV camera node. With one click on **"📱 Camera Node"**, your device captures video via HTML5 `getUserMedia` and streams it directly into the OmniSight surveillance matrix at 1080p/720p.
 
 ---
 
@@ -136,13 +138,21 @@ docker compose up -d
 |---|---|---|
 | `GET` | `/api/status` | System health, uptime, and ffmpeg status |
 | `GET` | `/api/cameras` | List configured cameras, active layout, and groups |
-| `POST` | `/api/cameras` | Register a new camera |
+| `POST` | `/api/cameras` | Register a new camera (auto-constructs URLs from vendor presets) |
 | `PUT` | `/api/cameras/{id}` | Update existing camera configuration |
 | `DELETE` | `/api/cameras/{id}` | Delete a camera |
 | `GET` | `/api/cameras/{id}/stream` | Live multipart/x-mixed-replace MJPEG video feed |
 | `GET` | `/api/cameras/{id}/snapshot` | Fetch single frame JPEG still |
-| `POST` | `/api/cameras/{id}/ptz` | Send PTZ action (`up`, `down`, `left`, `right`, `zoom_in`, `zoom_out`, `home`) |
-| `GET` | `/api/presets` | Get full database of camera brand presets & quirks |
+| `POST` | `/api/cameras/{id}/ptz` | Pan/Tilt/Zoom action + Hardware dispatch (Hikvision ISAPI, Dahua CGI, Axis, Foscam) |
+| `POST` | `/api/cameras/{id}/talk` | Live two-way intercom microphone audio chunk ingestion |
+| `POST` | `/api/cameras/{id}/control` | Smart camera controls (Night vision, Siren, Intercom toggle, Auto-Tracking) |
+| `GET` | `/api/cameras/{id}/timeline` | 24-Hour historical event markers (Motion, Smart AI, Vehicle, Doorbell) |
+| `GET` | `/api/cameras/{id}/playback` | Video scrubbing & historical playback frame streaming |
+| `POST` | `/api/cameras/probe` | **Universal Camera Prober**: Tests ports, RTSP DESCRIBE, snapshot URI, and codecs |
+| `GET` | `/api/system/webcams` | Enumerate local host USB webcams (DirectShow / V4L2) |
+| `POST` | `/api/cameras/{id}/ingest` | **Browser Camera Node**: Ingest live base64 JPEG frames from browser devices |
+| `POST` | `/api/dvr/import` | CCTV DVR Multi-channel BNC bulk importer |
+| `GET` | `/api/presets` | Get full database of 40+ camera brand presets, ports, and quirks |
 | `POST` | `/api/presets/generate` | Calculate RTSP stream URL based on vendor syntax |
 | `GET` | `/api/discovery/scan` | Broadcast ONVIF WS-Discovery probe & scan LAN subnet |
 | `GET` | `/api/snapshots` | List captured snapshot images |

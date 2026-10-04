@@ -134,124 +134,1170 @@ const DEFAULT_CLIENT_CAMERAS = [
 
 const BUILTIN_PRESETS = {
   "hikvision": {
+    "id": "hikvision",
     "name": "Hikvision (DS-2CD / ColorVu / AcuSense)",
-    "default_ports": { "rtsp": 554, "http": 80, "sdk": 8000 },
-    "default_credentials": { "username": "admin", "password": "" },
-    "rtsp_patterns": { "main": "rtsp://{username}:{password}@{ip}:{port}/Streaming/Channels/{channel}01" },
-    "snapshot_pattern": "http://{username}:{password}@{ip}:{port}/ISAPI/Streaming/channels/{channel}01/picture",
-    "default_channel": 1,
-    "quirks": ["Channel 1 Main = 101, Sub = 102. Enable ONVIF in Configuration > Network > Advanced Settings > Integration Protocol."]
+    "brand": "Hikvision",
+    "category": "mainstream",
+    "default_ports": {
+      "rtsp": 554,
+      "http": 80,
+      "sdk": 8000,
+      "onvif": 80
+    },
+    "default_credentials": {
+      "username": "admin",
+      "password": ""
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{username}:{password}@{ip}:{port}/Streaming/Channels/{channel}01",
+      "sub": "rtsp://{username}:{password}@{ip}:{port}/Streaming/Channels/{channel}02"
+    },
+    "snapshot_url": "http://{username}:{password}@{ip}:{port}/ISAPI/Streaming/channels/{channel}01/picture",
+    "ptz_supported": true,
+    "quirks": [
+      "ONVIF is often disabled by default on newer firmware. Enable it in Configuration > Network > Advanced Settings > Integration Protocol.",
+      "Create a dedicated ONVIF user with 'Digest/basic' authentication, not just Digest.",
+      "Channel number is typically 1 (becomes 101 for main stream, 102 for sub stream)."
+    ],
+    "default_channel": 1
   },
-  "hikvision_dvr": {
-    "name": "Hikvision CCTV DVR / TurboHD (BNC Coax)",
-    "default_ports": { "rtsp": 554, "http": 80 },
-    "default_credentials": { "username": "admin", "password": "" },
-    "rtsp_patterns": { "main": "rtsp://{username}:{password}@{ip}:{port}/Streaming/Channels/{channel}01" },
-    "snapshot_pattern": "http://{username}:{password}@{ip}:{port}/ISAPI/Streaming/channels/{channel}01/picture",
-    "default_channel": 1,
-    "quirks": ["Channel 1 BNC = 101, Channel 2 BNC = 201, Channel 3 BNC = 301. Multi-channel BNC DVR."]
+  "dahua": {
+    "id": "dahua",
+    "name": "Dahua / Imou (IPC / WizSense / TiOC / XVR)",
+    "brand": "Dahua",
+    "category": "mainstream",
+    "default_ports": {
+      "rtsp": 554,
+      "http": 80,
+      "tcp": 37777,
+      "onvif": 80
+    },
+    "default_credentials": {
+      "username": "admin",
+      "password": "admin"
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{username}:{password}@{ip}:{port}/cam/realmonitor?channel={channel}&subtype=0",
+      "sub": "rtsp://{username}:{password}@{ip}:{port}/cam/realmonitor?channel={channel}&subtype=1"
+    },
+    "snapshot_url": "http://{username}:{password}@{ip}:{port}/cgi-bin/snapshot.cgi?channel={channel}",
+    "ptz_supported": true,
+    "quirks": [
+      "Subtype 0 = Main Stream (2K/4K/H.265), Subtype 1 = Sub Stream (mobile / multi-view).",
+      "Port 37777 is the proprietary Dahua TCP management port.",
+      "For Imou consumer cameras, the password is often the Safety Code printed on the label."
+    ],
+    "default_channel": 1
+  },
+  "amcrest": {
+    "id": "amcrest",
+    "name": "Amcrest (IPC / ProHD / 4K / UltraHD / Doorbell)",
+    "brand": "Amcrest",
+    "category": "mainstream",
+    "default_ports": {
+      "rtsp": 554,
+      "http": 80,
+      "tcp": 37777,
+      "onvif": 80
+    },
+    "default_credentials": {
+      "username": "admin",
+      "password": "admin"
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{username}:{password}@{ip}:{port}/cam/realmonitor?channel={channel}&subtype=0",
+      "sub": "rtsp://{username}:{password}@{ip}:{port}/cam/realmonitor?channel={channel}&subtype=1"
+    },
+    "snapshot_url": "http://{username}:{password}@{ip}:{port}/cgi-bin/snapshot.cgi?channel={channel}",
+    "ptz_supported": true,
+    "quirks": [
+      "Amcrest runs Dahua OEM architecture. Uses Dahua CGI & realmonitor RTSP syntax.",
+      "Digest authentication is standard. Password must be configured on initial device setup."
+    ],
+    "default_channel": 1
+  },
+  "uniview": {
+    "id": "uniview",
+    "name": "Uniview (UNV / Tri-Guard / Prime)",
+    "brand": "Uniview",
+    "category": "mainstream",
+    "default_ports": {
+      "rtsp": 554,
+      "http": 80,
+      "onvif": 80
+    },
+    "default_credentials": {
+      "username": "admin",
+      "password": "123456"
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{username}:{password}@{ip}:{port}/unicast/c{channel}/s0/live",
+      "sub": "rtsp://{username}:{password}@{ip}:{port}/unicast/c{channel}/s1/live"
+    },
+    "snapshot_url": "http://{username}:{password}@{ip}:{port}/images/snapshot.jpg",
+    "ptz_supported": true,
+    "quirks": [
+      "URL format uses c{channel}/s0 for main stream, c{channel}/s1 for sub stream.",
+      "Default password on unactivated cameras is '123456'."
+    ],
+    "default_channel": 1
+  },
+  "axis": {
+    "id": "axis",
+    "name": "Axis Communications (VAPIX / M / P / Q Series)",
+    "brand": "Axis",
+    "category": "mainstream",
+    "default_ports": {
+      "rtsp": 554,
+      "http": 80,
+      "https": 443
+    },
+    "default_credentials": {
+      "username": "root",
+      "password": "pass"
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{username}:{password}@{ip}:{port}/axis-media/media.amp?videocodec=h264",
+      "sub": "rtsp://{username}:{password}@{ip}:{port}/axis-media/media.amp?videocodec=h264&resolution=640x360"
+    },
+    "snapshot_url": "http://{username}:{password}@{ip}:{port}/jpg/image.jpg",
+    "ptz_supported": true,
+    "quirks": [
+      "Root user is the primary administrative account on Axis hardware.",
+      "Supports VAPIX HTTP API and native RTSP over TCP or UDP."
+    ],
+    "default_channel": 1
+  },
+  "hanwha": {
+    "id": "hanwha",
+    "name": "Hanwha Techwin / Wisenet / Samsung",
+    "brand": "Hanwha",
+    "category": "mainstream",
+    "default_ports": {
+      "rtsp": 554,
+      "http": 80,
+      "https": 443
+    },
+    "default_credentials": {
+      "username": "admin",
+      "password": ""
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{username}:{password}@{ip}:{port}/profile2/media.smp",
+      "sub": "rtsp://{username}:{password}@{ip}:{port}/profile3/media.smp",
+      "alternate": "rtsp://{username}:{password}@{ip}:{port}/live/ch0"
+    },
+    "snapshot_url": "http://{username}:{password}@{ip}:{port}/stw-cgi/video.cgi?msubmenu=snapshot&action=view",
+    "ptz_supported": true,
+    "quirks": [
+      "Wisenet cameras use profile2 for high-res stream and profile3 for mobile sub-stream.",
+      "Requires Digest authentication over HTTP/RTSP."
+    ],
+    "default_channel": 1
+  },
+  "bosch": {
+    "id": "bosch",
+    "name": "Bosch Security (FLEXIDOME / DINION / AUTODOME)",
+    "brand": "Bosch",
+    "category": "mainstream",
+    "default_ports": {
+      "rtsp": 554,
+      "http": 80,
+      "https": 443
+    },
+    "default_credentials": {
+      "username": "service",
+      "password": ""
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{username}:{password}@{ip}:{port}/rtsp_tunnel?inst=1",
+      "sub": "rtsp://{username}:{password}@{ip}:{port}/rtsp_tunnel?inst=2"
+    },
+    "snapshot_url": "http://{username}:{password}@{ip}:{port}/snap.jpg",
+    "ptz_supported": true,
+    "quirks": [
+      "Bosch uses rtsp_tunnel URI endpoint with inst=1 for main, inst=2 for sub.",
+      "Default service accounts include 'service' or 'admin'."
+    ],
+    "default_channel": 1
+  },
+  "sony": {
+    "id": "sony",
+    "name": "Sony Surveillance (SNC Series / IPELA)",
+    "brand": "Sony",
+    "category": "mainstream",
+    "default_ports": {
+      "rtsp": 554,
+      "http": 80
+    },
+    "default_credentials": {
+      "username": "admin",
+      "password": "admin"
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{username}:{password}@{ip}:{port}/media/video1",
+      "sub": "rtsp://{username}:{password}@{ip}:{port}/media/video2"
+    },
+    "snapshot_url": "http://{username}:{password}@{ip}:{port}/oneshotimage.jpg",
+    "ptz_supported": true,
+    "quirks": [
+      "Sony IPELA cameras stream on /media/video1.",
+      "Snapshot endpoint is /oneshotimage.jpg."
+    ],
+    "default_channel": 1
+  },
+  "panasonic": {
+    "id": "panasonic",
+    "name": "Panasonic / i-PRO (WV Series)",
+    "brand": "Panasonic",
+    "category": "mainstream",
+    "default_ports": {
+      "rtsp": 554,
+      "http": 80
+    },
+    "default_credentials": {
+      "username": "admin",
+      "password": "12345"
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{username}:{password}@{ip}:{port}/MediaInput/h264",
+      "sub": "rtsp://{username}:{password}@{ip}:{port}/MediaInput/h264/stream_2"
+    },
+    "snapshot_url": "http://{username}:{password}@{ip}:{port}/cgi-bin/camera",
+    "ptz_supported": true,
+    "quirks": [
+      "i-PRO / Panasonic uses MediaInput/h264 path.",
+      "Default password on classic firmware is '12345'."
+    ],
+    "default_channel": 1
+  },
+  "vivotek": {
+    "id": "vivotek",
+    "name": "Vivotek (FD / IB / FE Series)",
+    "brand": "Vivotek",
+    "category": "mainstream",
+    "default_ports": {
+      "rtsp": 554,
+      "http": 80
+    },
+    "default_credentials": {
+      "username": "root",
+      "password": ""
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{username}:{password}@{ip}:{port}/live.sdp",
+      "sub": "rtsp://{username}:{password}@{ip}:{port}/live2.sdp"
+    },
+    "snapshot_url": "http://{username}:{password}@{ip}:{port}/cgi-bin/viewer/video.jpg",
+    "ptz_supported": true,
+    "quirks": [
+      "Vivotek uses live.sdp for stream 1 and live2.sdp for stream 2.",
+      "Default account is 'root' with empty password or user-configured."
+    ],
+    "default_channel": 1
+  },
+  "milesight": {
+    "id": "milesight",
+    "name": "Milesight (Mini / Pro / Vandal Dome)",
+    "brand": "Milesight",
+    "category": "mainstream",
+    "default_ports": {
+      "rtsp": 554,
+      "http": 80
+    },
+    "default_credentials": {
+      "username": "admin",
+      "password": "ms1234"
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{username}:{password}@{ip}:{port}/main",
+      "sub": "rtsp://{username}:{password}@{ip}:{port}/sub"
+    },
+    "snapshot_url": "http://{username}:{password}@{ip}:{port}/snapshot",
+    "ptz_supported": true,
+    "quirks": [
+      "Milesight uses clean /main and /sub RTSP paths.",
+      "Default factory password is 'ms1234'."
+    ],
+    "default_channel": 1
+  },
+  "mobotix": {
+    "id": "mobotix",
+    "name": "Mobotix (MxPEG / IP)",
+    "brand": "Mobotix",
+    "category": "mainstream",
+    "default_ports": {
+      "http": 80,
+      "rtsp": 554
+    },
+    "default_credentials": {
+      "username": "admin",
+      "password": "meinsm"
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{username}:{password}@{ip}:{port}/stream-0",
+      "mjpeg": "http://{username}:{password}@{ip}:{port}/control/faststream.jpg?stream=full"
+    },
+    "snapshot_url": "http://{username}:{password}@{ip}:{port}/record/current.jpg",
+    "ptz_supported": true,
+    "quirks": [
+      "Default password on older models was 'meinsm'.",
+      "Supports faststream.jpg continuous multipart MJPEG stream over HTTP."
+    ],
+    "default_channel": 1
+  },
+  "icsee": {
+    "id": "icsee",
+    "name": "ICSee / XMeye / iCSee Pro (App-Paired IP Camera)",
+    "brand": "ICSee",
+    "category": "consumer",
+    "default_ports": {
+      "rtsp": 554,
+      "media": 34567,
+      "onvif": 8899,
+      "http": 80
+    },
+    "default_credentials": {
+      "username": "admin",
+      "password": ""
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{username}:{password}@{ip}:{port}/live/ch0",
+      "sub": "rtsp://{username}:{password}@{ip}:{port}/live/ch1"
+    },
+    "snapshot_url": "http://{username}:{password}@{ip}:{port}/snapshot.jpg",
+    "ptz_supported": true,
+    "quirks": [
+      "App-First Camera: Configured via ICSee or XMeye mobile app with zero password prompt.",
+      "LOCAL PASSWORD IS BLANK: On your local Wi-Fi network, username is 'admin' and the password is completely BLANK / EMPTY ('')!",
+      "Snapshot feed is accessible without credentials at http://<ip>/snapshot.jpg.",
+      "CMS management port is 34567; ONVIF port is 8899."
+    ],
+    "default_channel": 0
+  },
+  "ezviz": {
+    "id": "ezviz",
+    "name": "EZVIZ (Hikvision App-Paired Camera)",
+    "brand": "EZVIZ",
+    "category": "consumer",
+    "default_ports": {
+      "rtsp": 554,
+      "http": 80,
+      "sdk": 8000
+    },
+    "default_credentials": {
+      "username": "admin",
+      "password": ""
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{username}:{password}@{ip}:{port}/h264/ch1/main",
+      "sub": "rtsp://{username}:{password}@{ip}:{port}/h264/ch1/sub",
+      "alternate": "rtsp://{username}:{password}@{ip}:{port}/Streaming/Channels/101"
+    },
+    "snapshot_url": "http://{username}:{password}@{ip}:{port}/ISAPI/Streaming/channels/101/picture",
+    "ptz_supported": true,
+    "quirks": [
+      "App-First Camera: Configured via EZVIZ mobile app.",
+      "WHERE TO FIND PASSWORD: The EZVIZ app never asks for a password when viewing video. However, local RTSP is protected!",
+      "PASSWORD = VERIFICATION CODE: Look at the sticker on the bottom/back of the camera. The 6-capital-letter 'Verification Code' (e.g. ABCDEF) is your password!",
+      "Username is always 'admin'."
+    ],
+    "default_channel": 1
+  },
+  "imou": {
+    "id": "imou",
+    "name": "Imou Life (Dahua App-Paired Camera)",
+    "brand": "Imou",
+    "category": "consumer",
+    "default_ports": {
+      "rtsp": 554,
+      "tcp": 37777,
+      "http": 80
+    },
+    "default_credentials": {
+      "username": "admin",
+      "password": ""
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{username}:{password}@{ip}:{port}/cam/realmonitor?channel={channel}&subtype=0",
+      "sub": "rtsp://{username}:{password}@{ip}:{port}/cam/realmonitor?channel={channel}&subtype=1"
+    },
+    "snapshot_url": "http://{username}:{password}@{ip}:{port}/cgi-bin/snapshot.cgi?channel={channel}",
+    "ptz_supported": true,
+    "quirks": [
+      "App-First Camera: Configured via Imou Life mobile app.",
+      "PASSWORD = SAFETY CODE: Viewing in the Imou app requires no password. For local NVR / RTSP streaming, the password is the 'Safety Code' printed on the camera bottom label.",
+      "Username is 'admin'."
+    ],
+    "default_channel": 1
+  },
+  "tapo": {
+    "id": "tapo",
+    "name": "TP-Link Tapo (C100, C200, C310, C500, D230)",
+    "brand": "TP-Link",
+    "category": "consumer",
+    "default_ports": {
+      "rtsp": 554,
+      "onvif": 2020,
+      "http": 80
+    },
+    "default_credentials": {
+      "username": "admin",
+      "password": ""
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{username}:{password}@{ip}:{port}/stream1",
+      "sub": "rtsp://{username}:{password}@{ip}:{port}/stream2"
+    },
+    "snapshot_url": "",
+    "ptz_supported": true,
+    "quirks": [
+      "CRITICAL: Do NOT use your TP-Link cloud account password!",
+      "You MUST create a local 'Camera Account' in the Tapo App: Device Settings > Advanced Settings > Camera Account.",
+      "ONVIF service is on port 2020."
+    ],
+    "default_channel": 1
+  },
+  "kasa": {
+    "id": "kasa",
+    "name": "TP-Link Kasa (KC100, KC120, KC200, KC420WS)",
+    "brand": "TP-Link",
+    "category": "consumer",
+    "default_ports": {
+      "rtsp": 554
+    },
+    "default_credentials": {
+      "username": "admin",
+      "password": ""
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{username}:{password}@{ip}:{port}/live/ch0",
+      "stream1": "rtsp://{username}:{password}@{ip}:{port}/stream1"
+    },
+    "snapshot_url": "",
+    "ptz_supported": false,
+    "quirks": [
+      "Enable 24/7 recording or RTSP in Kasa app settings if supported by firmware."
+    ],
+    "default_channel": 1
+  },
+  "reolink": {
+    "id": "reolink",
+    "name": "Reolink (RLC, Duo, TrackMix, E1 Pro)",
+    "brand": "Reolink",
+    "category": "consumer",
+    "default_ports": {
+      "rtsp": 554,
+      "http": 80,
+      "https": 443,
+      "onvif": 8000
+    },
+    "default_credentials": {
+      "username": "admin",
+      "password": ""
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{username}:{password}@{ip}:{port}/h264Preview_{channel}_main",
+      "sub": "rtsp://{username}:{password}@{ip}:{port}/h264Preview_{channel}_sub"
+    },
+    "snapshot_url": "http://{username}:{password}@{ip}:{port}/cgi-bin/api.cgi?cmd=Snap&channel={channel}&user={username}&password={password}",
+    "ptz_supported": true,
+    "quirks": [
+      "Channel is padded to 2 digits for some models (e.g., 01 for channel 1).",
+      "Enable RTSP and ONVIF in Network > Advanced > Server Settings on the Reolink Client/Web UI."
+    ],
+    "default_channel": "01"
+  },
+  "wyze": {
+    "id": "wyze",
+    "name": "Wyze Cam (v2 / v3 / v4 / Pan with RTSP / Wyze Bridge)",
+    "brand": "Wyze",
+    "category": "consumer",
+    "default_ports": {
+      "rtsp": 554,
+      "bridge": 8554
+    },
+    "default_credentials": {
+      "username": "",
+      "password": ""
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{username}:{password}@{ip}:{port}/live",
+      "bridge": "rtsp://{ip}:8554/{path}"
+    },
+    "snapshot_url": "http://{ip}:5000/snapshot/{path}",
+    "ptz_supported": true,
+    "quirks": [
+      "Stock Wyze cams require either official Wyze RTSP firmware, 'Thingino' / 'dafang' open-source firmware, or docker-wyze-bridge."
+    ],
+    "default_channel": 1
+  },
+  "eufy": {
+    "id": "eufy",
+    "name": "Eufy Security (SoloCam / Indoor Cam 2K / Outdoor RTSP)",
+    "brand": "Eufy",
+    "category": "consumer",
+    "default_ports": {
+      "rtsp": 554
+    },
+    "default_credentials": {
+      "username": "admin",
+      "password": ""
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{username}:{password}@{ip}:{port}/live0",
+      "sub": "rtsp://{username}:{password}@{ip}:{port}/live1"
+    },
+    "snapshot_url": "",
+    "ptz_supported": true,
+    "quirks": [
+      "Enable RTSP (NAS/RTSP Streaming) in the Eufy Security mobile app under Camera Settings > General > Storage > NAS (RTSP).",
+      "Copy the generated RTSP username and password from the app."
+    ],
+    "default_channel": 0
+  },
+  "foscam": {
+    "id": "foscam",
+    "name": "Foscam (R2 / FI98 / G4 / VD1 / X4)",
+    "brand": "Foscam",
+    "category": "consumer",
+    "default_ports": {
+      "rtsp": 554,
+      "http": 88,
+      "stream": 80
+    },
+    "default_credentials": {
+      "username": "admin",
+      "password": ""
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{username}:{password}@{ip}:{port}/videoMain",
+      "sub": "rtsp://{username}:{password}@{ip}:{port}/videoSub"
+    },
+    "snapshot_url": "http://{username}:{password}@{ip}:{port}/cgi-bin/CGIProxy.fcgi?cmd=snapPicture2&usr={username}&pwd={password}",
+    "ptz_supported": true,
+    "quirks": [
+      "Foscam cameras use /videoMain for primary RTSP and /videoSub for secondary stream.",
+      "HTTP port is often 88 or 80."
+    ],
+    "default_channel": 1
+  },
+  "tuya": {
+    "id": "tuya",
+    "name": "Tuya / Smart Life / Nedis / Woox (Smart Wi-Fi Cameras)",
+    "brand": "Tuya",
+    "category": "consumer",
+    "default_ports": {
+      "rtsp": 554,
+      "onvif": 8000,
+      "http": 8080
+    },
+    "default_credentials": {
+      "username": "admin",
+      "password": "admin"
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{username}:{password}@{ip}:{port}/live/ch0",
+      "onvif": "rtsp://{username}:{password}@{ip}:{port}/onvif1"
+    },
+    "snapshot_url": "http://{username}:{password}@{ip}:{port}/snapshot.jpg",
+    "ptz_supported": true,
+    "quirks": [
+      "Many Tuya-based smart Wi-Fi cameras support ONVIF on port 8000 or RTSP on 554.",
+      "Enable ONVIF / PC View in the Smart Life / Tuya mobile app settings."
+    ],
+    "default_channel": 0
+  },
+  "yoosee": {
+    "id": "yoosee",
+    "name": "Yoosee / Cooau / VStarcam (CloudLinks)",
+    "brand": "Yoosee",
+    "category": "consumer",
+    "default_ports": {
+      "rtsp": 554,
+      "onvif": 5000,
+      "http": 80
+    },
+    "default_credentials": {
+      "username": "admin",
+      "password": "123456"
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{username}:{password}@{ip}:{port}/onvif1",
+      "sub": "rtsp://{username}:{password}@{ip}:{port}/onvif2"
+    },
+    "snapshot_url": "",
+    "ptz_supported": true,
+    "quirks": [
+      "Turn on RTSP in the Yoosee app under Device Settings > NVR Connections / PC Monitoring.",
+      "Port 5000 is usually the ONVIF port; RTSP is standard 554."
+    ],
+    "default_channel": 1
+  },
+  "v380": {
+    "id": "v380",
+    "name": "V380 / V380 Pro / Macro-Video",
+    "brand": "V380",
+    "category": "consumer",
+    "default_ports": {
+      "rtsp": 554,
+      "http": 80,
+      "onvif": 8899
+    },
+    "default_credentials": {
+      "username": "admin",
+      "password": ""
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{username}:{password}@{ip}:{port}/live/ch0",
+      "sub": "rtsp://{username}:{password}@{ip}:{port}/live/ch1"
+    },
+    "snapshot_url": "",
+    "ptz_supported": true,
+    "quirks": [
+      "Many V380 cameras lock RTSP by default. Enable ONVIF in app settings if available.",
+      "Common Chinese security cam hardware OEM with Macro-Video firmware."
+    ],
+    "default_channel": 0
+  },
+  "v360": {
+    "id": "v360",
+    "name": "V360 Pro / Qianniao Xiangyun (CFEO Series / Cloudbirds / KeepEyes)",
+    "brand": "Shenzhen Qianniao Xiangyun Technology",
+    "category": "consumer",
+    "default_ports": {
+      "rtsp": 554,
+      "alt_rtsp": 8554,
+      "onvif": 6688,
+      "http": 80,
+      "cms": 8899
+    },
+    "default_credentials": {
+      "username": "admin",
+      "password": ""
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{username}:{password}@{ip}:{port}/live/ch0",
+      "sub": "rtsp://{username}:{password}@{ip}:{port}/live/ch1",
+      "alt8554": "rtsp://{username}:{password}@{ip}:8554/profile0",
+      "alt_ch00": "rtsp://{username}:{password}@{ip}:{port}/live/ch00_0",
+      "onvif": "rtsp://{username}:{password}@{ip}:{port}/onvif1"
+    },
+    "snapshot_url": "http://{username}:{password}@{ip}:{port}/snapshot.jpg",
+    "ptz_supported": true,
+    "quirks": [
+      "Manufacturer: Shenzhen Qianniao Xiangyun Technology Co., Ltd (Cloudbirds / sz-cloudbirds.com).",
+      "Device Model & Cloud UID format: CFEO-XXXXXX-XXXXX (e.g., CFEO-164806-HRZJY).",
+      "No Password in App: The V360 Pro app pairs via cloud P2P with zero password prompt. On your local Wi-Fi, the camera accepts username 'admin' with a BLANK (empty) password ('')!",
+      "Port 8554 vs 554: Many Qianniao / Fullhan firmware builds run RTSP on port 8554 (/profile0) or port 554 (/live/ch0).",
+      "ONVIF port is commonly 6688 or 8899. If locked, check V360 Pro app settings for 'PC View' or 'Local Monitoring'."
+    ],
+    "default_channel": 0
+  },
+  "srihome": {
+    "id": "srihome",
+    "name": "SriHome / Sricam (SH029, SH030, SP017)",
+    "brand": "SriHome",
+    "category": "consumer",
+    "default_ports": {
+      "rtsp": 554,
+      "onvif": 5000
+    },
+    "default_credentials": {
+      "username": "admin",
+      "password": "admin"
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{username}:{password}@{ip}:{port}/onvif1",
+      "sub": "rtsp://{username}:{password}@{ip}:{port}/onvif2"
+    },
+    "snapshot_url": "",
+    "ptz_supported": true,
+    "quirks": [
+      "RTSP port is 554, ONVIF port is 5000.",
+      "App password defaults to 'admin' or user set in SriHome app."
+    ],
+    "default_channel": 1
+  },
+  "dlink": {
+    "id": "dlink",
+    "name": "D-Link (DCS Series / mydlink)",
+    "brand": "D-Link",
+    "category": "consumer",
+    "default_ports": {
+      "rtsp": 554,
+      "http": 80
+    },
+    "default_credentials": {
+      "username": "admin",
+      "password": ""
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{username}:{password}@{ip}:{port}/live.sdp",
+      "sub": "rtsp://{username}:{password}@{ip}:{port}/live2.sdp",
+      "h264": "rtsp://{username}:{password}@{ip}:{port}/play1.sdp"
+    },
+    "snapshot_url": "http://{username}:{password}@{ip}:{port}/image/jpeg.cgi",
+    "ptz_supported": true,
+    "quirks": [
+      "DCS series commonly uses /live.sdp or /play1.sdp.",
+      "Snapshot endpoint is /image/jpeg.cgi."
+    ],
+    "default_channel": 1
+  },
+  "unifi": {
+    "id": "unifi",
+    "name": "Ubiquiti UniFi Protect (RTSP Re-stream)",
+    "brand": "Ubiquiti",
+    "category": "consumer",
+    "default_ports": {
+      "rtsp": 7447,
+      "rtsps": 7441,
+      "standard": 554
+    },
+    "default_credentials": {
+      "username": "",
+      "password": ""
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{ip}:{port}/{path}"
+    },
+    "snapshot_url": "http://{ip}/snap.jpeg",
+    "ptz_supported": false,
+    "quirks": [
+      "In UniFi Protect web app: Click Camera > Settings > Advanced > Enable RTSP.",
+      "Change rtsps:// to rtsp:// and port 7441 to 7447 for unencrypted fast LAN streaming."
+    ],
+    "default_channel": 1
   },
   "xiongmai": {
-    "name": "Xiongmai / XM / CMS (Generic Chinese Cam)",
-    "default_ports": { "rtsp": 554, "media": 34567, "onvif": 8899 },
-    "default_credentials": { "username": "admin", "password": "" },
-    "rtsp_patterns": { "main": "rtsp://{username}:{password}@{ip}:{port}/live/ch0" },
-    "snapshot_pattern": "http://{username}:{password}@{ip}:{port}/snapshot.jpg",
-    "default_channel": 0,
-    "quirks": ["Media port is 34567. If it forces Internet Explorer ActiveX, use snapshot.jpg polling to view without IE!"]
-  },
-  "xiongmai_dvr": {
-    "name": "Chinese AHD/TVI CCTV DVR (NetSurveillance)",
-    "default_ports": { "rtsp": 554, "media": 34567 },
-    "default_credentials": { "username": "admin", "password": "" },
-    "rtsp_patterns": { "main": "rtsp://{username}:{password}@{ip}:{port}/live/ch{channel_index}" },
-    "snapshot_pattern": "http://{username}:{password}@{ip}:{port}/snapshot.jpg",
-    "default_channel": 1,
-    "quirks": ["BNC Ch 1 = /live/ch0, BNC Ch 2 = /live/ch1, Ch 3 = /live/ch2. Desktop CMS port is 34567."]
+    "id": "xiongmai",
+    "name": "Xiongmai / XM / NetSurveillance (Generic Chinese Cam)",
+    "brand": "Xiongmai (XM)",
+    "category": "chinese_oem",
+    "default_ports": {
+      "rtsp": 554,
+      "media": 34567,
+      "onvif": 8899,
+      "http": 80
+    },
+    "default_credentials": {
+      "username": "admin",
+      "password": ""
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{username}:{password}@{ip}:{port}/live/ch0",
+      "sub": "rtsp://{username}:{password}@{ip}:{port}/live/ch1",
+      "alternate": "rtsp://{username}:{password}@{ip}:{port}/h264/ch1/main/av_stream"
+    },
+    "snapshot_url": "http://{username}:{password}@{ip}:{port}/snapshot.jpg",
+    "ptz_supported": true,
+    "quirks": [
+      "The quintessential 'Random Chinese IP Camera' chipset (HiSilicon / XM530 / Sofia / Goke).",
+      "Typically operates on Media Port 34567 for CMS / VMS desktop software.",
+      "ONVIF is usually on port 8899 or 80. Default password is often completely empty.",
+      "If camera demands Internet Explorer ActiveX, use OmniSight's direct snapshot polling or RTSP feed!"
+    ],
+    "default_channel": 0
   },
   "gatocam": {
+    "id": "gatocam",
     "name": "Shenzhen GatoCam (Indoor / Outdoor / PTZ)",
-    "default_ports": { "rtsp": 554, "media": 34567, "onvif": 8899, "http": 80 },
-    "default_credentials": { "username": "admin", "password": "" },
-    "rtsp_patterns": { "main": "rtsp://{username}:{password}@{ip}:{port}/live/ch0" },
-    "snapshot_pattern": "http://{username}:{password}@{ip}:{port}/snapshot.jpg",
-    "default_channel": 0,
+    "brand": "Shenzhen Gato",
+    "category": "chinese_oem",
+    "default_ports": {
+      "rtsp": 554,
+      "http": 80,
+      "onvif": 8899,
+      "media": 34567
+    },
+    "default_credentials": {
+      "username": "admin",
+      "password": ""
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{username}:{password}@{ip}:{port}/live/ch0",
+      "sub": "rtsp://{username}:{password}@{ip}:{port}/live/ch1",
+      "stream1": "rtsp://{username}:{password}@{ip}:{port}/stream1",
+      "onvif1": "rtsp://{username}:{password}@{ip}:{port}/onvif1"
+    },
+    "snapshot_url": "http://{username}:{password}@{ip}:{port}/snapshot.jpg",
+    "ptz_supported": true,
     "quirks": [
       "Shenzhen Gato / XM / Sofia OEM architecture with HiSilicon/Goke SoC.",
       "Primary RTSP pattern: rtsp://<ip>:554/live/ch0 or /stream1.",
       "Legacy Snapshot URL: http://<ip>/snapshot.jpg or http://<ip>/tmpfs/auto.jpg.",
-      "Default password is empty or '123456' / 'admin'.",
-      "Zero-IE HTML5 engine bypasses required ActiveX plugins.",
-      "Eligible for OpenIPC flashing (HiSilicon Hi3516 / XM530) for full cloud-free autonomy."
-    ]
+      "Zero-IE HTML5 engine bypasses required ActiveX plugins."
+    ],
+    "default_channel": 0
   },
-  "dahua": {
-    "name": "Dahua / Imou (IPC / WizSense / XVR)",
-    "default_ports": { "rtsp": 554, "tcp": 37777 },
-    "default_credentials": { "username": "admin", "password": "admin" },
-    "rtsp_patterns": { "main": "rtsp://{username}:{password}@{ip}:{port}/cam/realmonitor?channel={channel}&subtype=0" },
-    "snapshot_pattern": "http://{username}:{password}@{ip}:{port}/cgi-bin/snapshot.cgi?channel={channel}",
-    "default_channel": 1,
-    "quirks": ["Subtype 0 = Main, Subtype 1 = Sub. Port 37777 is Dahua TCP management."]
+  "hikvision_dvr": {
+    "id": "hikvision_dvr",
+    "name": "Hikvision CCTV DVR / TurboHD (Analog BNC Multi-channel)",
+    "brand": "Hikvision",
+    "category": "dvr",
+    "default_ports": {
+      "rtsp": 554,
+      "http": 80,
+      "sdk": 8000
+    },
+    "default_credentials": {
+      "username": "admin",
+      "password": ""
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{username}:{password}@{ip}:{port}/Streaming/Channels/{channel}01",
+      "sub": "rtsp://{username}:{password}@{ip}:{port}/Streaming/Channels/{channel}02"
+    },
+    "snapshot_url": "http://{username}:{password}@{ip}:{port}/ISAPI/Streaming/channels/{channel}01/picture",
+    "ptz_supported": true,
+    "quirks": [
+      "Hikvision DVR / TurboHD digitizes analog coaxial BNC cameras.",
+      "Channel 1 BNC = 101, Channel 2 BNC = 201, Channel 3 = 301, Channel 4 = 401, etc.",
+      "Sub-stream for mobile / multi-grid uses suffix 02 (e.g., 102, 202, 302)."
+    ],
+    "default_channel": 1
+  },
+  "xiongmai_dvr": {
+    "id": "xiongmai_dvr",
+    "name": "Chinese AHD/TVI/CVI DVR (Xiongmai H.264/H.265 NetSurveillance)",
+    "brand": "Xiongmai (XM)",
+    "category": "dvr",
+    "default_ports": {
+      "rtsp": 554,
+      "media": 34567,
+      "onvif": 8899,
+      "http": 80
+    },
+    "default_credentials": {
+      "username": "admin",
+      "password": ""
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{username}:{password}@{ip}:{port}/live/ch{channel_index}",
+      "sub": "rtsp://{username}:{password}@{ip}:{port}/live/ch{channel_index}_sub"
+    },
+    "snapshot_url": "http://{username}:{password}@{ip}:{port}/snapshot.jpg",
+    "ptz_supported": true,
+    "quirks": [
+      "Standard Chinese CCTV DVR for coaxial BNC cameras (AHD, TVI, CVI, CVBS).",
+      "Channels are 0-indexed: BNC Ch 1 = /live/ch0, BNC Ch 2 = /live/ch1, Ch 3 = /live/ch2.",
+      "Desktop software port is 34567 (CMS / XMeye). Password on 'admin' is almost always blank."
+    ],
+    "default_channel": 1
+  },
+  "zosi_dvr": {
+    "id": "zosi_dvr",
+    "name": "ZOSI / Lorex / Swann / Night Owl / Annke (Analog & IP NVR)",
+    "brand": "ZOSI / Lorex",
+    "category": "dvr",
+    "default_ports": {
+      "rtsp": 554,
+      "http": 80,
+      "media": 9000
+    },
+    "default_credentials": {
+      "username": "admin",
+      "password": ""
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{username}:{password}@{ip}:{port}/ucast/{channel}1",
+      "sub": "rtsp://{username}:{password}@{ip}:{port}/ucast/{channel}2",
+      "alternate": "rtsp://{username}:{password}@{ip}:{port}/Streaming/Channels/{channel}01"
+    },
+    "snapshot_url": "",
+    "ptz_supported": true,
+    "quirks": [
+      "Common OEM for ZOSI, Lorex, Swann, and Night Owl DVRs.",
+      "Uses /ucast/11 (Channel 1 Main), /ucast/12 (Channel 1 Sub), /ucast/21 (Channel 2 Main)."
+    ],
+    "default_channel": 1
+  },
+  "esp32_cam": {
+    "id": "esp32_cam",
+    "name": "ESP32-CAM / ESP32-S3 Eye / Seeed Xiao",
+    "brand": "ESP32",
+    "category": "diy",
+    "default_ports": {
+      "http": 80,
+      "stream": 81,
+      "alt": 8080
+    },
+    "default_credentials": {
+      "username": "",
+      "password": ""
+    },
+    "rtsp_patterns": {
+      "main": "http://{ip}:{port}/stream",
+      "mjpeg": "http://{ip}:81/stream"
+    },
+    "snapshot_url": "http://{ip}:{port}/capture",
+    "ptz_supported": false,
+    "quirks": [
+      "Standard Espressif camera web server firmware streams multipart MJPEG on port 80/stream or 81/stream.",
+      "Single still frame capture on /capture."
+    ],
+    "default_channel": 1
+  },
+  "raspberry_pi": {
+    "id": "raspberry_pi",
+    "name": "Raspberry Pi Camera / OctoPrint / Prusa / Klipper",
+    "brand": "Raspberry Pi",
+    "category": "diy",
+    "default_ports": {
+      "http": 8080,
+      "stream": 5000,
+      "standard": 80
+    },
+    "default_credentials": {
+      "username": "",
+      "password": ""
+    },
+    "rtsp_patterns": {
+      "main": "http://{ip}:{port}/?action=stream",
+      "mjpg": "http://{ip}:{port}/webcam/?action=stream",
+      "rtsp": "rtsp://{ip}:8554/unicast"
+    },
+    "snapshot_url": "http://{ip}:{port}/?action=snapshot",
+    "ptz_supported": false,
+    "quirks": [
+      "Standard mjpg-streamer or ustreamer endpoint used by OctoPrint and Mainsail / Fluidd.",
+      "RTSP available when running mediamtx or libcamera-vid."
+    ],
+    "default_channel": 1
+  },
+  "ip_webcam": {
+    "id": "ip_webcam",
+    "name": "Android & iOS IP Webcam Apps (IP Webcam / DroidCam)",
+    "brand": "IP Webcam",
+    "category": "diy",
+    "default_ports": {
+      "http": 8080,
+      "droidcam": 4747
+    },
+    "default_credentials": {
+      "username": "",
+      "password": ""
+    },
+    "rtsp_patterns": {
+      "main": "http://{ip}:{port}/video",
+      "mjpeg": "http://{ip}:{port}/videofeed",
+      "droid": "http://{ip}:{port}/mjpegfeed"
+    },
+    "snapshot_url": "http://{ip}:{port}/shot.jpg",
+    "ptz_supported": true,
+    "quirks": [
+      "Turn any old smartphone into an HD CCTV camera in seconds.",
+      "Supports torch control, front/back camera switch, and live MJPEG streaming."
+    ],
+    "default_channel": 1
+  },
+  "usb_webcam": {
+    "id": "usb_webcam",
+    "name": "Local USB Webcam / Built-in Camera (DirectShow / V4L2)",
+    "brand": "Local Hardware",
+    "category": "diy",
+    "default_ports": {
+      "stream": 0
+    },
+    "default_credentials": {
+      "username": "",
+      "password": ""
+    },
+    "rtsp_patterns": {
+      "main": "webcam://{path}"
+    },
+    "snapshot_url": "/api/cameras/{id}/snapshot",
+    "ptz_supported": false,
+    "quirks": [
+      "Direct USB or integrated webcam hardware ingestion from the host system.",
+      "Uses DirectShow on Windows, V4L2 on Linux (/dev/video0), and AVFoundation on macOS."
+    ],
+    "default_channel": 0
+  },
+  "browser_node": {
+    "id": "browser_node",
+    "name": "Browser Camera Node (Stream Phone / Laptop into NVR)",
+    "brand": "HTML5 Node",
+    "category": "diy",
+    "default_ports": {
+      "stream": 8080
+    },
+    "default_credentials": {
+      "username": "",
+      "password": ""
+    },
+    "rtsp_patterns": {
+      "main": "node://{id}"
+    },
+    "snapshot_url": "/api/cameras/{id}/snapshot",
+    "ptz_supported": false,
+    "quirks": [
+      "Zero installation: Uses browser navigator.mediaDevices.getUserMedia() to push frames straight into the NVR!",
+      "Any phone, iPad, or laptop can act as a surveillance node."
+    ],
+    "default_channel": 1
   },
   "legacy_activex": {
+    "id": "legacy_activex",
     "name": "Legacy Camera (Requires Internet Explorer / ActiveX)",
-    "default_ports": { "http": 80, "rtsp": 554 },
-    "default_credentials": { "username": "admin", "password": "" },
-    "rtsp_patterns": { "main": "rtsp://{username}:{password}@{ip}:{port}/live/ch0" },
-    "snapshot_pattern": "http://{ip}:{port}/snapshot.jpg",
-    "default_channel": 1,
+    "brand": "Legacy CCTV",
+    "category": "generic",
+    "default_ports": {
+      "http": 80,
+      "rtsp": 554
+    },
+    "default_credentials": {
+      "username": "admin",
+      "password": ""
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{username}:{password}@{ip}:{port}/live/ch0"
+    },
+    "snapshot_url": "http://{ip}:{port}/snapshot.jpg",
+    "ptz_supported": true,
     "quirks": [
-      "Bypasses ActiveX! OmniSight polls the camera's raw snapshot endpoint at 10 FPS, so you can view it in Chrome/Edge/Firefox without Internet Explorer."
-    ]
-  },
-  "tapo": {
-    "name": "TP-Link Tapo (C100, C200, C310)",
-    "default_ports": { "rtsp": 554, "onvif": 2020 },
-    "default_credentials": { "username": "admin", "password": "" },
-    "rtsp_patterns": { "main": "rtsp://{username}:{password}@{ip}:{port}/stream1" },
-    "default_channel": 1,
-    "quirks": ["Must configure local 'Camera Account' inside Tapo App > Device Settings > Advanced Settings > Camera Account."]
-  },
-  "reolink": {
-    "name": "Reolink (RLC / Duo / E1)",
-    "default_ports": { "rtsp": 554, "onvif": 8000 },
-    "default_credentials": { "username": "admin", "password": "" },
-    "rtsp_patterns": { "main": "rtsp://{username}:{password}@{ip}:{port}/h264Preview_{channel}_main" },
-    "default_channel": "01",
-    "quirks": ["Enable RTSP/ONVIF in Reolink Client under Network Settings."]
+      "Bypasses ActiveX! OmniSight polls the camera's raw snapshot endpoint at 15 FPS, so you can view it in Chrome/Edge/Firefox without Internet Explorer."
+    ],
+    "default_channel": 0
   },
   "generic_onvif": {
-    "name": "Generic ONVIF Camera",
-    "default_ports": { "rtsp": 554, "onvif": 80 },
-    "default_credentials": { "username": "admin", "password": "admin" },
-    "rtsp_patterns": { "main": "rtsp://{username}:{password}@{ip}:{port}/onvif1" },
-    "default_channel": 1,
-    "quirks": ["Standard ONVIF Profile S stream URL."]
+    "id": "generic_onvif",
+    "name": "Generic ONVIF Camera (Profile S / G / T)",
+    "brand": "ONVIF",
+    "category": "generic",
+    "default_ports": {
+      "rtsp": 554,
+      "onvif": 80,
+      "http": 80
+    },
+    "default_credentials": {
+      "username": "admin",
+      "password": "admin"
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{username}:{password}@{ip}:{port}/onvif1",
+      "sub": "rtsp://{username}:{password}@{ip}:{port}/onvif2"
+    },
+    "snapshot_url": "",
+    "ptz_supported": true,
+    "quirks": [
+      "Standard ONVIF Profile S stream URL. OmniSight auto-negotiates RTSP URI dynamically."
+    ],
+    "default_channel": 1
   },
   "generic_rtsp": {
-    "name": "Custom RTSP Stream",
-    "default_ports": { "rtsp": 554 },
-    "default_credentials": { "username": "", "password": "" },
-    "rtsp_patterns": { "main": "rtsp://{username}:{password}@{ip}:{port}/{path}" },
-    "default_channel": 1,
-    "quirks": ["Provide your direct RTSP URL path."]
+    "id": "generic_rtsp",
+    "name": "Custom RTSP Stream (TCP / UDP / Auto)",
+    "brand": "Custom RTSP",
+    "category": "generic",
+    "default_ports": {
+      "rtsp": 554
+    },
+    "default_credentials": {
+      "username": "",
+      "password": ""
+    },
+    "rtsp_patterns": {
+      "main": "rtsp://{username}:{password}@{ip}:{port}/{path}"
+    },
+    "snapshot_url": "",
+    "ptz_supported": false,
+    "quirks": [
+      "Provide your exact RTSP path in the URL field. OmniSight automatically retries UDP if TCP times out."
+    ],
+    "default_channel": 1
+  },
+  "rtmp_stream": {
+    "id": "rtmp_stream",
+    "name": "RTMP / RTMPS Live Stream (OBS / Dji / Action Cam)",
+    "brand": "RTMP",
+    "category": "generic",
+    "default_ports": {
+      "rtmp": 1935
+    },
+    "default_credentials": {
+      "username": "",
+      "password": ""
+    },
+    "rtsp_patterns": {
+      "main": "rtmp://{ip}:{port}/{path}"
+    },
+    "snapshot_url": "",
+    "ptz_supported": false,
+    "quirks": [
+      "Ingest live broadcast streams from OBS Studio, action cams, drones, or RTMP re-streamers."
+    ],
+    "default_channel": 1
   },
   "mjpeg_http": {
-    "name": "HTTP MJPEG / ESP32-CAM",
-    "default_ports": { "http": 80, "stream": 8080 },
-    "default_credentials": { "username": "", "password": "" },
-    "rtsp_patterns": { "main": "http://{ip}:{port}/stream" },
-    "default_channel": 1,
-    "quirks": ["Direct HTTP multipart MJPEG stream."]
+    "id": "mjpeg_http",
+    "name": "HTTP MJPEG Stream",
+    "brand": "HTTP/MJPEG",
+    "category": "generic",
+    "default_ports": {
+      "http": 80,
+      "stream": 8080
+    },
+    "default_credentials": {
+      "username": "",
+      "password": ""
+    },
+    "rtsp_patterns": {
+      "main": "http://{ip}:{port}/stream",
+      "mjpeg": "http://{ip}:{port}/mjpeg"
+    },
+    "snapshot_url": "http://{ip}:{port}/snapshot.jpg",
+    "ptz_supported": false,
+    "quirks": [
+      "Direct multipart MJPEG stream over HTTP. Fully functional without external dependencies."
+    ],
+    "default_channel": 1
+  },
+  "hls_stream": {
+    "id": "hls_stream",
+    "name": "HLS Stream (.m3u8)",
+    "brand": "HLS",
+    "category": "generic",
+    "default_ports": {
+      "http": 80,
+      "https": 443
+    },
+    "default_credentials": {
+      "username": "",
+      "password": ""
+    },
+    "rtsp_patterns": {
+      "main": "http://{ip}:{port}/{path}"
+    },
+    "snapshot_url": "",
+    "ptz_supported": false,
+    "quirks": [
+      "HTTP Live Streaming playlist (.m3u8). Transcoded to low-latency MJPEG for instant matrix display."
+    ],
+    "default_channel": 1
   },
   "simulated": {
-    "name": "OmniSight Virtual CCTV Generator",
-    "default_ports": { "stream": 8000 },
-    "default_credentials": { "username": "", "password": "" },
-    "rtsp_patterns": { "main": "sim://{scene}" },
-    "default_channel": 1,
-    "quirks": ["Procedural surveillance engine with animated OSD and motion detection."]
+    "id": "simulated",
+    "name": "OmniSight Virtual CCTV Generator (Simulation)",
+    "brand": "OmniSight Simulator",
+    "category": "generic",
+    "default_ports": {
+      "stream": 8000
+    },
+    "default_credentials": {
+      "username": "",
+      "password": ""
+    },
+    "rtsp_patterns": {
+      "main": "sim://{scene}"
+    },
+    "snapshot_url": "/api/cameras/{id}/snapshot",
+    "ptz_supported": true,
+    "quirks": [
+      "Built-in procedural CCTV video engine. Simulates vendor OSD, night vision, motion triggers, and pan/tilt."
+    ],
+    "default_channel": 1
   }
 };
 
@@ -954,6 +2000,18 @@ function setupCameraPlayer(cam) {
   const container = document.getElementById(`videoContainer-${cam.id}`);
   if (!container) return;
 
+  // Browser Camera Node direct local mirror with zero latency
+  if ((cam.vendor === "browser_node" || cam.id === activeBrowserNodeCamId) && activeBrowserNodeStream) {
+    const vid = document.createElement("video");
+    vid.className = "video-feed";
+    vid.autoplay = true;
+    vid.muted = true;
+    vid.playsInline = true;
+    vid.srcObject = activeBrowserNodeStream;
+    container.insertBefore(vid, container.firstChild);
+    return;
+  }
+
   if (localApiAvailable) {
     // Connected to Python server: use native multipart MJPEG
     const img = document.createElement("img");
@@ -961,6 +2019,19 @@ function setupCameraPlayer(cam) {
     img.src = `/api/cameras/${cam.id}/stream?token=${encodeURIComponent(authToken)}`;
     img.alt = cam.name;
     container.insertBefore(img, container.firstChild);
+    return;
+  }
+
+  // Browser Camera Node in GitHub Pages mode (sharing frames via canvas)
+  if ((cam.vendor === "browser_node" || cam.id === activeBrowserNodeCamId) && latestBrowserNodeFrame) {
+    const img = document.createElement("img");
+    img.className = "video-feed";
+    img.alt = cam.name;
+    img.src = latestBrowserNodeFrame;
+    container.insertBefore(img, container.firstChild);
+    pollingIntervals[cam.id] = setInterval(() => {
+      if (latestBrowserNodeFrame) img.src = latestBrowserNodeFrame;
+    }, 120);
     return;
   }
 
@@ -974,8 +2045,12 @@ function setupCameraPlayer(cam) {
     let snapUrl = "";
     if (cam.vendor === "hikvision" || cam.vendor === "hikvision_dvr") {
       snapUrl = `http://${cam.ip}/ISAPI/Streaming/channels/${cam.channel || 1}01/picture`;
-    } else if (cam.vendor === "dahua") {
+    } else if (cam.vendor === "dahua" || cam.vendor === "amcrest") {
       snapUrl = `http://${cam.ip}/cgi-bin/snapshot.cgi?channel=${cam.channel || 1}`;
+    } else if (cam.vendor === "axis") {
+      snapUrl = `http://${cam.ip}/jpg/image.jpg`;
+    } else if (cam.vendor === "uniview") {
+      snapUrl = `http://${cam.ip}/images/snapshot.jpg`;
     } else {
       snapUrl = `http://${cam.ip}/snapshot.jpg`;
     }
@@ -1653,14 +2728,17 @@ camVendor.addEventListener("change", () => {
   const selected = camVendor.value;
   const preset = vendorPresets[selected] || BUILTIN_PRESETS[selected];
   if (preset) {
-    document.getElementById("camPort").value = preset.default_ports?.rtsp || 554;
+    document.getElementById("camPort").value = preset.default_ports?.rtsp || preset.default_ports?.http || 554;
     document.getElementById("camChannel").value = preset.default_channel ?? 1;
     if (preset.default_credentials) {
-      document.getElementById("camUser").value = preset.default_credentials.username || "admin";
+      document.getElementById("camUser").value = preset.default_credentials.username || "";
       document.getElementById("camPass").value = preset.default_credentials.password || "";
     }
     if (selected === "legacy_activex") {
       document.getElementById("camLegacyPolling").checked = true;
+    }
+    if (selected === "webcam" || selected === "browser_node") {
+      document.getElementById("camIp").value = "127.0.0.1";
     }
   }
   updateVendorQuirks();
@@ -1673,13 +2751,27 @@ function autoGenerateUrl() {
   const port = parseInt(document.getElementById("camPort").value) || 554;
   const username = document.getElementById("camUser").value;
   const password = document.getElementById("camPass").value;
-  const channel = document.getElementById("camChannel").value;
+  const channel = document.getElementById("camChannel").value || 1;
+
+  if (vendor === "webcam") {
+    document.getElementById("camStreamUrl").value = "webcam://0";
+    return;
+  }
+  if (vendor === "browser_node") {
+    document.getElementById("camStreamUrl").value = "node://browser-cam";
+    return;
+  }
+  if (vendor === "simulated") {
+    document.getElementById("camStreamUrl").value = "sim://surveillance_grid";
+    return;
+  }
 
   const preset = vendorPresets[vendor] || BUILTIN_PRESETS[vendor] || BUILTIN_PRESETS["generic_rtsp"];
   const creds = username && password ? `${username}:${password}@` : (username ? `${username}@` : "");
+  const snapPattern = preset?.snapshot_pattern || preset?.snapshot_url;
   
-  if (document.getElementById("camLegacyPolling").checked && preset.snapshot_pattern) {
-    const snapUrl = preset.snapshot_pattern
+  if (document.getElementById("camLegacyPolling").checked && snapPattern) {
+    const snapUrl = snapPattern
       .replace("{username}:{password}@", creds)
       .replace("{ip}", ip)
       .replace("{port}", port === 554 ? "80" : String(port))
@@ -1688,7 +2780,7 @@ function autoGenerateUrl() {
     return;
   }
 
-  const pattern = preset.rtsp_patterns?.main || "rtsp://{username}:{password}@{ip}:{port}/live/ch0";
+  const pattern = preset?.rtsp_patterns?.main || "rtsp://{username}:{password}@{ip}:{port}/live/ch0";
   const chIdx = Math.max(0, parseInt(channel || 1) - 1);
   const streamUrl = pattern
     .replace("{username}:{password}@", creds)
@@ -1887,8 +2979,457 @@ function addDiscoveredCamera(ip, vendorPreset) {
   autoGenerateUrl();
 }
 
+
+// Browser Camera Node State
+let activeBrowserNodeStream = null;
+let browserNodeInterval = null;
+let activeBrowserNodeCamId = "node-browser-cam";
+let latestBrowserNodeFrame = null;
+
+// Universal Camera Hardware Diagnostic & Stream Prober
+async function handleProbeCamera() {
+  const btn = document.getElementById("btnProbeCamera");
+  const resultBox = document.getElementById("probeResultBox");
+  const chipsBox = document.getElementById("probeChips");
+  const recBox = document.getElementById("probeRecommendation");
+  const previewContainer = document.getElementById("probePreviewContainer");
+  const previewImg = document.getElementById("probePreviewImg");
+
+  const ip = document.getElementById("camIp").value.trim();
+  const portVal = document.getElementById("camPort").value.trim();
+  const username = document.getElementById("camUser").value.trim();
+  const password = document.getElementById("camPass").value;
+  const channel = document.getElementById("camChannel").value || 1;
+  const vendorHint = document.getElementById("camVendor").value;
+
+  if (!ip) {
+    alert("Please enter a camera IP address or hostname to probe.");
+    document.getElementById("camIp").focus();
+    return;
+  }
+
+  btn.disabled = true;
+  btn.innerHTML = `<span class="icon">⏳</span> Probing ${escapeHtml(ip)}...`;
+  resultBox.classList.remove("hidden");
+  previewContainer.classList.add("hidden");
+  chipsBox.innerHTML = `<span class="probe-chip active">Scanning open ports & RTSP DESCRIBE...</span>`;
+  recBox.innerHTML = `<em>Testing ports 554, 80, 8080, 8000, 37777, 34567 and probing RTSP candidates...</em>`;
+
+  if (localApiAvailable) {
+    try {
+      const res = await authFetch("/api/cameras/probe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ip,
+          port: portVal ? parseInt(portVal) : null,
+          username,
+          password,
+          vendor: vendorHint,
+          channel: parseInt(channel)
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        renderProbeResults(data);
+      } else {
+        chipsBox.innerHTML = `<span class="probe-chip error">Probe Request Failed (${res.status})</span>`;
+        recBox.textContent = "Could not communicate with probe diagnostic engine.";
+      }
+    } catch (err) {
+      chipsBox.innerHTML = `<span class="probe-chip error">Network Error</span>`;
+      recBox.textContent = `Error reaching NVR backend: ${err.message}`;
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = `<span class="icon">🔍</span> Probe &amp; Test Stream`;
+    }
+    return;
+  }
+
+  // Standalone Client / GitHub Pages fallback probe
+  setTimeout(() => {
+    btn.disabled = false;
+    btn.innerHTML = `<span class="icon">🔍</span> Probe &amp; Test Stream`;
+
+    if (ip === "127.0.0.1" || ip === "localhost") {
+      chipsBox.innerHTML = `
+        <span class="probe-chip active">Target: Localhost</span>
+        <span class="probe-chip codec">Mode: Simulator / Virtual</span>
+      `;
+      recBox.textContent = "Detected local loopback. Recommended profile: OmniSight Virtual CCTV Generator.";
+      document.getElementById("camVendor").value = "simulated";
+      updateVendorQuirks();
+      autoGenerateUrl();
+      return;
+    }
+
+    chipsBox.innerHTML = `
+      <span class="probe-chip active">Target: ${escapeHtml(ip)}</span>
+      <span class="probe-chip" style="background: rgba(59,130,246,0.15); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3);">Client-Side Analysis</span>
+    `;
+    recBox.innerHTML = `Direct raw socket RTSP probing requires the local Python NVR backend (:8080). Auto-generated standard URL for <strong>${escapeHtml(vendorHint.toUpperCase())}</strong> below.`;
+    autoGenerateUrl();
+  }, 600);
+}
+
+function renderProbeResults(data) {
+  const chipsBox = document.getElementById("probeChips");
+  const recBox = document.getElementById("probeRecommendation");
+  const previewContainer = document.getElementById("probePreviewContainer");
+  const previewImg = document.getElementById("probePreviewImg");
+
+  chipsBox.innerHTML = "";
+
+  // 1. Target & Reachability Chip
+  if (data.reachable) {
+    chipsBox.innerHTML += `<span class="probe-chip active">Reachable (${escapeHtml(data.ip)})</span>`;
+  } else {
+    chipsBox.innerHTML += `<span class="probe-chip error">Host Unreachable (${escapeHtml(data.ip)})</span>`;
+  }
+
+  // 2. Open Ports Chips
+  if (data.open_ports && data.open_ports.length > 0) {
+    data.open_ports.forEach(p => {
+      let label = `Port ${p}`;
+      if (p === 554) label += " (RTSP)";
+      else if (p === 80) label += " (HTTP)";
+      else if (p === 37777) label += " (Dahua TCP)";
+      else if (p === 34567) label += " (XM CMS)";
+      else if (p === 8000) label += " (Hik/Reolink SDK)";
+      else if (p === 2020) label += " (Tapo ONVIF)";
+      else if (p === 8899) label += " (ONVIF)";
+      chipsBox.innerHTML += `<span class="probe-chip" style="background: rgba(52, 199, 89, 0.12); color: #34c759; border: 1px solid rgba(52, 199, 89, 0.3);">${label}</span>`;
+    });
+  } else if (data.reachable) {
+    chipsBox.innerHTML += `<span class="probe-chip warning">No Standard CCTV Ports Responding</span>`;
+  }
+
+  // 3. RTSP & Codec Chip
+  if (data.rtsp && data.rtsp.open) {
+    const codec = data.rtsp.video_codec || "H.264";
+    chipsBox.innerHTML += `<span class="probe-chip codec">Video Codec: ${escapeHtml(codec)}</span>`;
+    if (data.rtsp.audio) {
+      chipsBox.innerHTML += `<span class="probe-chip active">Audio: Yes</span>`;
+    }
+    if (data.rtsp.latency_ms) {
+      chipsBox.innerHTML += `<span class="probe-chip" style="background: rgba(0, 212, 255, 0.15); color: #00d4ff; border: 1px solid rgba(0, 212, 255, 0.3);">${Math.round(data.rtsp.latency_ms)}ms Latency</span>`;
+    }
+  }
+
+  // 4. Snapshot Status
+  if (data.snapshot && data.snapshot.open) {
+    chipsBox.innerHTML += `<span class="probe-chip active">Snapshot Polling: OK</span>`;
+  }
+
+  // 5. Detected Brand / Architecture
+  if (data.detected_vendor && data.detected_vendor !== "generic_rtsp") {
+    chipsBox.innerHTML += `<span class="probe-chip" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3);">Brand: ${escapeHtml(data.detected_vendor.toUpperCase())}</span>`;
+    const opt = document.querySelector(`#camVendor option[value="${data.detected_vendor}"]`);
+    if (opt) {
+      document.getElementById("camVendor").value = data.detected_vendor;
+      updateVendorQuirks();
+    }
+  }
+
+  // 6. Password & Authentication Status Chip
+  if (data.password_status === "none_required") {
+    chipsBox.innerHTML += `<span class="probe-chip active" style="background: rgba(52, 199, 89, 0.18); color: #34c759; border: 1px solid rgba(52, 199, 89, 0.4);">🔓 No Password Required (Anonymous Stream)</span>`;
+    document.getElementById("camUser").value = "";
+    document.getElementById("camPass").value = "";
+  } else if (data.password_status === "blank_password") {
+    chipsBox.innerHTML += `<span class="probe-chip active" style="background: rgba(52, 199, 89, 0.18); color: #34c759; border: 1px solid rgba(52, 199, 89, 0.4);">🔓 Password: BLANK (Empty)</span>`;
+    document.getElementById("camUser").value = data.discovered_username || "admin";
+    document.getElementById("camPass").value = "";
+  } else if (data.password_status === "default_found") {
+    chipsBox.innerHTML += `<span class="probe-chip active" style="background: rgba(52, 199, 89, 0.18); color: #34c759; border: 1px solid rgba(52, 199, 89, 0.4);">🔑 Unlocked: ${escapeHtml(data.discovered_username)} / ${escapeHtml(data.discovered_password)}</span>`;
+    document.getElementById("camUser").value = data.discovered_username || "admin";
+    document.getElementById("camPass").value = data.discovered_password || "";
+  } else if (data.password_status === "custom_required") {
+    chipsBox.innerHTML += `<span class="probe-chip warning" style="background: rgba(255, 149, 0, 0.18); color: #ff9500; border: 1px solid rgba(255, 149, 0, 0.4);">🔒 App Password Required</span>`;
+  }
+
+  // Recommendation Text
+  recBox.innerHTML = `<strong>Diagnostic Summary:</strong> ${escapeHtml(data.summary || data.auth_summary || "Analysis complete.")}`;
+
+  // Auto-fill recommended URL
+  if (data.stream_url || data.recommended_url) {
+    document.getElementById("camStreamUrl").value = data.stream_url || data.recommended_url;
+  }
+  if (data.recommended_mode === "snapshot") {
+    document.getElementById("camLegacyPolling").checked = true;
+  }
+
+  // Render snapshot preview if returned
+  if (data.snapshot && data.snapshot.data_uri) {
+    previewContainer.classList.remove("hidden");
+    previewImg.src = data.snapshot.data_uri;
+  } else {
+    previewContainer.classList.add("hidden");
+  }
+}
+
+// Browser Camera Node (Stream Phone / Laptop into NVR)
+async function startBrowserCameraNode() {
+  const btnStart = document.getElementById("btnStartBrowserNode");
+  const btnStop = document.getElementById("btnStopBrowserNode");
+  const facing = document.getElementById("nodeCamFacing").value || "environment";
+  const camName = document.getElementById("nodeCamName").value.trim() || "Mobile Sentry Cam";
+  const video = document.getElementById("nodeVideoPreview");
+  const liveBadge = document.getElementById("nodeLiveBadge");
+
+  btnStart.disabled = true;
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: facing,
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
+      },
+      audio: false
+    });
+
+    activeBrowserNodeStream = stream;
+    video.srcObject = stream;
+    liveBadge.classList.remove("hidden");
+    btnStop.disabled = false;
+
+    const offscreenCanvas = document.createElement("canvas");
+    offscreenCanvas.width = 960;
+    offscreenCanvas.height = 540;
+    const ctx = offscreenCanvas.getContext("2d");
+
+    const nodePayload = {
+      id: activeBrowserNodeCamId,
+      name: camName,
+      group: "Mobile Nodes",
+      vendor: "browser_node",
+      ip: "127.0.0.1",
+      port: 8080,
+      channel: 1,
+      stream_url: `node://${activeBrowserNodeCamId}`,
+      is_simulated: false,
+      ptz: false,
+      status: "online",
+      fps: 10,
+      resolution: "960x540"
+    };
+
+    if (localApiAvailable) {
+      try {
+        const exist = cameras.find(c => c.id === activeBrowserNodeCamId);
+        if (!exist) {
+          await authFetch("/api/cameras", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(nodePayload)
+          });
+          await fetchCameras();
+        }
+      } catch (e) {}
+    } else {
+      const idx = cameras.findIndex(c => c.id === activeBrowserNodeCamId);
+      if (idx > -1) {
+        cameras[idx] = { ...cameras[idx], ...nodePayload };
+      } else {
+        cameras.push(nodePayload);
+      }
+      saveLocalCameras();
+      renderGrid();
+    }
+
+    let isIngesting = false;
+    browserNodeInterval = setInterval(async () => {
+      if (!activeBrowserNodeStream || video.readyState < 2) return;
+
+      try {
+        ctx.drawImage(video, 0, 0, offscreenCanvas.width, offscreenCanvas.height);
+        const dataUri = offscreenCanvas.toDataURL("image/jpeg", 0.65);
+        latestBrowserNodeFrame = dataUri;
+
+        if (localApiAvailable && !isIngesting) {
+          isIngesting = true;
+          authFetch(`/api/cameras/${activeBrowserNodeCamId}/ingest`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ frame_base64: dataUri })
+          }).finally(() => {
+            isIngesting = false;
+          });
+        }
+      } catch (err) {}
+    }, 120);
+
+    showNotification(`Streaming live from this device as "${camName}"!`, "success");
+    renderGrid();
+  } catch (err) {
+    btnStart.disabled = false;
+    alert(`Could not access device camera: ${err.message || err.name}. Please ensure camera permissions are granted.`);
+  }
+}
+
+function stopBrowserCameraNode() {
+  const btnStart = document.getElementById("btnStartBrowserNode");
+  const btnStop = document.getElementById("btnStopBrowserNode");
+  const video = document.getElementById("nodeVideoPreview");
+  const liveBadge = document.getElementById("nodeLiveBadge");
+
+  if (browserNodeInterval) {
+    clearInterval(browserNodeInterval);
+    browserNodeInterval = null;
+  }
+
+  if (activeBrowserNodeStream) {
+    activeBrowserNodeStream.getTracks().forEach(t => t.stop());
+    activeBrowserNodeStream = null;
+  }
+
+  video.srcObject = null;
+  liveBadge.classList.add("hidden");
+  btnStart.disabled = false;
+  btnStop.disabled = true;
+  latestBrowserNodeFrame = null;
+
+  showNotification("Device camera broadcast stopped.", "info");
+  renderGrid();
+}
+
+// App-Configured Camera Assistant Helper (No Password in App)
+function initAppHelper() {
+  const btnToggle = document.getElementById("btnToggleAppHelper");
+  const drawer = document.getElementById("appHelperDrawer");
+  const selector = document.getElementById("appSelector");
+  const tipBox = document.getElementById("appSecretTip");
+
+  if (btnToggle && drawer) {
+    btnToggle.onclick = () => {
+      drawer.classList.toggle("hidden");
+      btnToggle.textContent = drawer.classList.contains("hidden") ? "App Assistant ▾" : "Close Assistant ▴";
+    };
+  }
+
+  const APP_GUIDES = {
+    "icsee": {
+      title: "ICSee / XMeye / iCSee Pro",
+      vendor: "icsee",
+      username: "admin",
+      password: "",
+      port: 554,
+      desc: "<strong>Zero Password in App:</strong> The ICSee mobile app pairs via cloud and doesn't ask for a password. On your local Wi-Fi, the camera accepts username <code>admin</code> with a <strong>completely BLANK (empty) password</strong>! Auto-filled below."
+    },
+    "v380": {
+      title: "V380 / V380 Pro (Macro-Video)",
+      vendor: "v380",
+      username: "admin",
+      password: "",
+      port: 554,
+      desc: "<strong>Local Feed is Open / Blank Password:</strong> V380 cameras stream on port 554 with username <code>admin</code> and an <strong>empty / blank password</strong>, or accept anonymous streams. Auto-filled below."
+    },
+    "v360": {
+      title: "V360 Pro / KeepEyes (Shenzhen Qianniao Xiangyun / CFEO)",
+      vendor: "v360",
+      username: "admin",
+      password: "",
+      port: 554,
+      desc: "<strong>Zero Password in App (CFEO Series):</strong> The V360 Pro app by Shenzhen Qianniao Xiangyun Technology pairs via cloud UID (e.g. <code>CFEO-164806-HRZJY</code>) and never prompts for a camera password.<br>• On your local Wi-Fi, the camera streams with username <code>admin</code> and an <strong>empty / BLANK password</strong>!<br>• Commonly streams on <strong>Port 554</strong> (/live/ch0) or <strong>Port 8554</strong> (/profile0).<br>• Click <strong>⚡ Test Connection</strong> below to auto-test and verify!"
+    },
+    "tapo": {
+      title: "TP-Link Tapo (C100, C200, C310, C500) & Kasa",
+      vendor: "tapo",
+      username: "",
+      password: "",
+      port: 554,
+      desc: "⚠️ <strong>Cloud Password Won't Work:</strong> Your TP-Link cloud account password does NOT work for local RTSP.<br>1. Open the <strong>Tapo App</strong> on your phone.<br>2. Tap your camera &gt; <strong>Settings ⚙️</strong> &gt; <strong>Advanced Settings</strong> &gt; <strong>Camera Account</strong>.<br>3. Create a simple local username (e.g. <code>admin</code>) and password. Enter those below!"
+    },
+    "ezviz": {
+      title: "EZVIZ (Hikvision)",
+      vendor: "ezviz",
+      username: "admin",
+      password: "",
+      port: 554,
+      desc: "🔑 <strong>Password is on Camera Sticker:</strong> EZVIZ never asks for a password in the app. For local RTSP streaming:<br>• Look at the sticker on the bottom or back of the camera.<br>• The 6-capital-letter <strong>Verification Code</strong> (e.g. <code>ABCDEF</code>) is your password!<br>• Username is <code>admin</code>."
+    },
+    "imou": {
+      title: "Imou Life (Dahua)",
+      vendor: "imou",
+      username: "admin",
+      password: "",
+      port: 554,
+      desc: "🔑 <strong>Password is on Camera Bottom Label:</strong> In the Imou Life app, video loads without a password.<br>• For local NVR streaming, look at the sticker on the camera bottom.<br>• The <strong>Safety Code</strong> is your password!<br>• Username is <code>admin</code>."
+    },
+    "yoosee": {
+      title: "Yoosee / YYP2P",
+      vendor: "yoosee",
+      username: "admin",
+      password: "",
+      port: 554,
+      desc: "Username is <code>admin</code>. Password is usually <strong>BLANK</strong> or <code>123456</code>. Make sure <em>NVR Connections / PC Monitoring</em> is toggled ON in Yoosee app settings."
+    },
+    "tuya": {
+      title: "Tuya / Smart Life / Geeni",
+      vendor: "tuya",
+      username: "admin",
+      password: "admin",
+      port: 554,
+      desc: "In Tuya / Smart Life app, open camera settings and look for <strong>PC View</strong> or <strong>ONVIF</strong> to toggle local LAN streaming on."
+    },
+    "eufy": {
+      title: "Eufy Security",
+      vendor: "eufy",
+      username: "admin",
+      password: "",
+      port: 554,
+      desc: "Open Eufy App &gt; Camera Settings &gt; <strong>Storage</strong> &gt; <strong>NAS (RTSP) Stream</strong>. Enable it and copy the username/password shown on your phone screen."
+    },
+    "wyze": {
+      title: "Wyze Cam",
+      vendor: "wyze",
+      username: "",
+      password: "",
+      port: 554,
+      desc: "Stock Wyze cams require either official Wyze RTSP firmware, docker-wyze-bridge (:8554), or open-source Thingino / OpenIPC firmware."
+    }
+  };
+
+  if (selector && tipBox) {
+    selector.onchange = () => {
+      const selected = selector.value;
+      const guide = APP_GUIDES[selected];
+      if (!guide) {
+        tipBox.classList.add("hidden");
+        return;
+      }
+
+      tipBox.innerHTML = `
+        <div style="font-weight: 600; color: #60a5fa; margin-bottom: 4px;">📱 ${guide.title} Setup Secret:</div>
+        <div>${guide.desc}</div>
+      `;
+      tipBox.classList.remove("hidden");
+
+      // Auto-populate form
+      if (guide.vendor) {
+        document.getElementById("camVendor").value = guide.vendor;
+        updateVendorQuirks();
+      }
+      if (guide.username !== undefined) {
+        document.getElementById("camUser").value = guide.username;
+      }
+      if (guide.password !== undefined) {
+        document.getElementById("camPass").value = guide.password;
+      }
+      if (guide.port) {
+        document.getElementById("camPort").value = guide.port;
+      }
+      autoGenerateUrl();
+    };
+  }
+}
+
 // Attach Event Listeners
 function attachEventListeners() {
+  initAppHelper();
+
   // Layout Buttons
   document.querySelectorAll(".btn-layout").forEach(btn => {
     btn.onclick = () => setLayout(btn.dataset.layout);
@@ -2235,6 +3776,10 @@ function attachEventListeners() {
         mainUrl = `rtsp://${username}:${password}@${ip}:${port}/Streaming/Channels/${ch}01`;
       } else if (vendor === "xiongmai_dvr") {
         mainUrl = `rtsp://${username}:${password}@${ip}:${port}/live/ch${ch - 1}`;
+      } else if (vendor === "uniview" || vendor === "uniview_nvr") {
+        mainUrl = `rtsp://${username}:${password}@${ip}:${port}/unicast/c${ch}/s0/live`;
+      } else if (vendor === "zosi_dvr") {
+        mainUrl = `rtsp://${username}:${password}@${ip}:${port}/ucast/11?channel=${ch}&subtype=0`;
       } else {
         mainUrl = `rtsp://${username}:${password}@${ip}:${port}/cam/realmonitor?channel=${ch}&subtype=0`;
       }
@@ -2447,6 +3992,29 @@ function attachEventListeners() {
 
   // Auto URL on IP blur
   document.getElementById("camIp").addEventListener("blur", autoGenerateUrl);
+
+  // Probe Camera Button
+  document.getElementById("btnProbeCamera")?.addEventListener("click", handleProbeCamera);
+
+  // Browser Camera Node Handlers
+  const browserNodeModal = document.getElementById("browserNodeModal");
+  const btnBrowserNode = document.getElementById("btnBrowserNode");
+  const btnCloseBrowserNodeModal = document.getElementById("btnCloseBrowserNodeModal");
+  const btnStartBrowserNode = document.getElementById("btnStartBrowserNode");
+  const btnStopBrowserNode = document.getElementById("btnStopBrowserNode");
+
+  if (btnBrowserNode && browserNodeModal) {
+    btnBrowserNode.onclick = () => browserNodeModal.classList.remove("hidden");
+  }
+  if (btnCloseBrowserNodeModal && browserNodeModal) {
+    btnCloseBrowserNodeModal.onclick = () => browserNodeModal.classList.add("hidden");
+  }
+  if (btnStartBrowserNode) {
+    btnStartBrowserNode.onclick = startBrowserCameraNode;
+  }
+  if (btnStopBrowserNode) {
+    btnStopBrowserNode.onclick = stopBrowserCameraNode;
+  }
 
   // Mobile Bottom Tab Bar Handlers
   const mobileMenuModal = document.getElementById("mobileMenuModal");

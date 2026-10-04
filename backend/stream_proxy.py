@@ -1,7 +1,8 @@
 """
 OmniSight-NVR - Universal Stream Proxy & Procedural CCTV Engine
-Handles RTSP ingestion (via ffmpeg when available), HTTP/MJPEG streams,
-and procedural CCTV frame synthesis for Hikvision, Dahua, Xiongmai, and generic cameras.
+Handles RTSP/RTSPS/RTMP/HLS ingestion via FFmpeg with automatic transport fallbacks (TCP->UDP->HTTP),
+resilient auto-reconnect, local USB/DirectShow webcam ingestion, browser camera node uploading,
+HTTP/MJPEG snapshot polling, and procedural CCTV frame synthesis.
 """
 
 import os
@@ -12,6 +13,9 @@ import shutil
 import random
 import threading
 import subprocess
+import urllib.request
+import urllib.parse
+import re
 from typing import Dict, Any, Optional, Iterator
 from PIL import Image, ImageDraw, ImageFont
 
@@ -19,13 +23,16 @@ FFMPEG_BIN = shutil.which("ffmpeg")
 
 
 class CameraStreamSession:
-    """Manages stream ingestion and client distribution for a single camera."""
+    """Manages stream ingestion, hardware PTZ, and client distribution for a single camera."""
 
     def __init__(self, camera_info: Dict[str, Any]):
         self.camera_info = camera_info
         self.camera_id = camera_info["id"]
         self.stream_url = camera_info.get("stream_url", "")
-        self.is_simulated = camera_info.get("is_simulated", False) or self.stream_url.startswith("sim://")
+        self.is_simulated = (
+            camera_info.get("is_simulated", False) or
+            self.stream_url.startswith("sim://")
+        )
         
         self.active_subscribers = 0
         self._lock = threading.Lock()
@@ -33,8 +40,10 @@ class CameraStreamSession:
         self._thread: Optional[threading.Thread] = None
         self._latest_jpeg: Optional[bytes] = None
         self._last_frame_time = 0.0
+        self.connection_status = "idle"  # idle, connecting, streaming, reconnecting, error
+        self.reconnect_count = 0
         
-        # PTZ State
+        # PTZ State (Virtual coordinates + Hardware Tracking)
         self.pan = 0.0     # -180 to 180 degrees
         self.tilt = 0.0    # -90 to 90 degrees
         self.zoom = 1.0    # 1.0x to 10.0x
@@ -44,7 +53,7 @@ class CameraStreamSession:
         self.motion_box = None
         self.motion_timer = 0
 
-        # V380 Pro / V360 Pro Advanced Controls
+        # Smart Camera Controls (Night Vision, Siren, Intercom, Auto-Tracking)
         self.night_vision = "auto"  # auto, color, ir, smart
         self.siren_active = False
         self.intercom_active = False
@@ -56,6 +65,16 @@ class CameraStreamSession:
             2: {"pan": 45.0, "tilt": 15.0, "zoom": 1.5},
             3: {"pan": -45.0, "tilt": -10.0, "zoom": 2.0}
         }
+
+    def push_frame(self, jpeg_bytes: bytes) -> bool:
+        """Allows external sources (e.g. Browser Camera Node or local webcam) to push frames."""
+        if not jpeg_bytes or len(jpeg_bytes) < 100:
+            return False
+        with self._lock:
+            self._latest_jpeg = jpeg_bytes
+            self._last_frame_time = time.time()
+            self.connection_status = "streaming"
+        return True
 
     def set_night_vision(self, mode: str):
         with self._lock:
@@ -122,6 +141,7 @@ class CameraStreamSession:
                 self.zoom = p["zoom"]
 
     def adjust_ptz(self, action: str, step: float = 5.0):
+        """Updates internal PTZ telemetry and dispatches native hardware PTZ commands to physical camera."""
         with self._lock:
             if action == "left":
                 self.pan = max(-180.0, self.pan - step)
@@ -156,6 +176,93 @@ class CameraStreamSession:
                 except (IndexError, ValueError):
                     pass
 
+        # Dispatch native hardware command in background if camera has physical IP
+        ip = self.camera_info.get("ip", "")
+        if ip and not self.is_simulated and not ip.startswith("127."):
+            threading.Thread(target=self._dispatch_hardware_ptz, args=(action,), daemon=True).start()
+
+    def _dispatch_hardware_ptz(self, action: str):
+        """Sends native vendor PTZ commands (Hikvision ISAPI, Dahua CGI, Axis VAPIX, etc.)."""
+        ip = self.camera_info.get("ip", "")
+        vendor = self.camera_info.get("vendor", "")
+        channel = self.camera_info.get("channel", 1)
+        username = self.camera_info.get("username", "admin")
+        password = self.camera_info.get("password", "")
+
+        try:
+            # 1. Dahua & Amcrest PTZ CGI
+            if vendor in ("dahua", "amcrest"):
+                dahua_codes = {
+                    "left": "Left", "right": "Right", "up": "Up", "down": "Down",
+                    "zoom_in": "ZoomTele", "zoom_out": "ZoomWide"
+                }
+                code = dahua_codes.get(action)
+                if code:
+                    url = f"http://{ip}/cgi-bin/ptz.cgi?action=start&channel={channel}&code={code}&arg1=0&arg2=5&arg3=0"
+                    self._send_authenticated_http(url, username, password)
+                    time.sleep(0.3)
+                    stop_url = f"http://{ip}/cgi-bin/ptz.cgi?action=stop&channel={channel}&code={code}&arg1=0&arg2=5&arg3=0"
+                    self._send_authenticated_http(stop_url, username, password)
+
+            # 2. Hikvision ISAPI PTZ
+            elif vendor in ("hikvision", "hikvision_dvr"):
+                isapi_pan = 0
+                isapi_tilt = 0
+                if action == "left": isapi_pan = -60
+                elif action == "right": isapi_pan = 60
+                elif action == "up": isapi_tilt = 60
+                elif action == "down": isapi_tilt = -60
+
+                if isapi_pan != 0 or isapi_tilt != 0:
+                    xml = f"""<PTZData><pan>{isapi_pan}</pan><tilt>{isapi_tilt}</tilt></PTZData>"""
+                    url = f"http://{ip}/ISAPI/PTZCtrl/channels/{channel}/continuous"
+                    self._send_authenticated_http(url, username, password, method="PUT", data=xml.encode("utf-8"), content_type="application/xml")
+                    time.sleep(0.4)
+                    stop_xml = """<PTZData><pan>0</pan><tilt>0</tilt></PTZData>"""
+                    self._send_authenticated_http(url, username, password, method="PUT", data=stop_xml.encode("utf-8"), content_type="application/xml")
+
+            # 3. Axis VAPIX PTZ
+            elif vendor == "axis":
+                axis_params = {
+                    "left": "continuouspantiltmove=-50,0", "right": "continuouspantiltmove=50,0",
+                    "up": "continuouspantiltmove=0,50", "down": "continuouspantiltmove=0,-50",
+                    "zoom_in": "continuouszoommove=50", "zoom_out": "continuouszoommove=-50"
+                }
+                param = axis_params.get(action)
+                if param:
+                    url = f"http://{ip}/axis-cgi/com/ptz.cgi?{param}"
+                    self._send_authenticated_http(url, username, password)
+                    time.sleep(0.3)
+                    self._send_authenticated_http(f"http://{ip}/axis-cgi/com/ptz.cgi?continuouspantiltmove=0,0&continuouszoommove=0", username, password)
+
+            # 4. Foscam CGI
+            elif vendor == "foscam":
+                foscam_cmds = {
+                    "left": "ptzMoveLeft", "right": "ptzMoveRight", "up": "ptzMoveUp", "down": "ptzMoveDown"
+                }
+                cmd = foscam_cmds.get(action)
+                if cmd:
+                    url = f"http://{ip}/cgi-bin/CGIProxy.fcgi?cmd={cmd}&usr={username}&pwd={password}"
+                    self._send_authenticated_http(url, username, password)
+                    time.sleep(0.3)
+                    self._send_authenticated_http(f"http://{ip}/cgi-bin/CGIProxy.fcgi?cmd=ptzStopRun&usr={username}&pwd={password}", username, password)
+        except Exception:
+            pass
+
+    def _send_authenticated_http(self, url: str, username: str, password: str, method: str = "GET", data: Optional[bytes] = None, content_type: str = "text/plain"):
+        """Lightweight HTTP helper with Digest & Basic Auth for hardware camera controls."""
+        try:
+            pwd_mgr = urllib.request.HTTPPasswordMgrWithDefaultRealm()
+            pwd_mgr.add_password(None, url, username, password or "")
+            auth_h = urllib.request.HTTPDigestAuthHandler(pwd_mgr)
+            basic_h = urllib.request.HTTPBasicAuthHandler(pwd_mgr)
+            opener = urllib.request.build_opener(auth_h, basic_h)
+            req = urllib.request.Request(url, data=data, headers={"User-Agent": "OmniSight/1.0", "Content-Type": content_type}, method=method)
+            with opener.open(req, timeout=1.5):
+                pass
+        except Exception:
+            pass
+
     def start(self):
         with self._lock:
             if not self._running:
@@ -171,26 +278,210 @@ class CameraStreamSession:
         with self._lock:
             if self._latest_jpeg:
                 return self._latest_jpeg
-        # Fallback frame if none exists yet
         return self._generate_simulated_frame(0)
 
     def _worker_loop(self):
-        """Dispatches either real RTSP/HTTP or the procedural simulation engine."""
+        """Universal Dispatcher: FFmpeg (RTSP/RTMP/HLS), USB Webcam, Browser Node, HTTP Snapshot, or Simulator."""
         ip = self.camera_info.get("ip", "")
-        # Prioritize real hardware polling if IP is present and not explicitly sim://
-        if not self.is_simulated and FFMPEG_BIN and self.stream_url.startswith("rtsp://"):
-            self._ffmpeg_rtsp_loop()
-        elif (not self.is_simulated or (ip and not self.stream_url.startswith("sim://"))) and (self.camera_info.get("snapshot_url") or self.camera_info.get("legacy_polling") or ip):
+        vendor = self.camera_info.get("vendor", "")
+
+        # 1. Local USB / DirectShow Webcam
+        if self.stream_url.startswith("webcam://") or vendor == "usb_webcam":
+            if FFMPEG_BIN:
+                self._ffmpeg_webcam_loop()
+            else:
+                self._simulation_loop()
+            return
+
+        # 2. Browser Camera Node (Phone or Laptop streaming to NVR)
+        if self.stream_url.startswith("node://") or vendor == "browser_node":
+            self._browser_node_loop()
+            return
+
+        # 3. Live Stream Feeds (RTSP, RTSPS, RTMP, HLS .m3u8, or HTTP-FLV)
+        is_stream_feed = any(self.stream_url.startswith(p) for p in ("rtsp://", "rtsps://", "rtmp://", "rtmps://")) or self.stream_url.endswith(".m3u8")
+        if not self.is_simulated and FFMPEG_BIN and is_stream_feed:
+            self._ffmpeg_universal_stream_loop()
+            return
+
+        # 4. HTTP Snapshot Polling (Direct camera picture polling with zero IE or ActiveX)
+        if (not self.is_simulated or (ip and not self.stream_url.startswith("sim://"))) and (
+            self.camera_info.get("snapshot_url") or self.camera_info.get("legacy_polling") or ip
+        ):
             self._http_snapshot_polling_loop()
+            return
+
+        # 5. Fallback: Procedural Surveillance Simulation Engine
+        self._simulation_loop()
+
+    def _browser_node_loop(self):
+        """Maintains state for a browser camera node; draws placeholder if waiting for frames."""
+        self.connection_status = "connecting"
+        while self._running:
+            now = time.time()
+            if self._latest_jpeg and (now - self._last_frame_time < 5.0):
+                self.connection_status = "streaming"
+                time.sleep(0.1)
+            else:
+                self.connection_status = "connecting"
+                msg = f"BROWSER CAMERA NODE READY\nAWAITING STREAM FROM DEVICE\n{self.camera_info.get('name', 'Camera')}"
+                with self._lock:
+                    self._latest_jpeg = self._draw_connecting_frame(msg, status_color=(0, 200, 255))
+                time.sleep(1.0)
+
+    def _ffmpeg_webcam_loop(self):
+        """Captures video from physical USB webcams via DirectShow (Windows) or V4L2 (Linux)."""
+        device_arg = self.stream_url.replace("webcam://", "").strip() or "0"
+        fps = str(self.camera_info.get("fps", 20))
+
+        if os.name == "nt":
+            # Windows DirectShow
+            # If numeric, wrap in video="<num>" or default name
+            if device_arg == "0":
+                device_spec = "video=Integrated Camera"
+            else:
+                device_spec = f"video={device_arg}"
+            input_args = ["-f", "dshow", "-i", device_spec]
         else:
-            self._simulation_loop()
+            # Linux V4L2
+            input_args = ["-f", "v4l2", "-i", device_arg if device_arg.startswith("/dev/") else f"/dev/video{device_arg}"]
+
+        cmd = [
+            FFMPEG_BIN,
+            "-hide_banner",
+            "-loglevel", "error",
+            *input_args,
+            "-f", "image2pipe",
+            "-vcodec", "mjpeg",
+            "-q:v", "4",
+            "-r", fps,
+            "-"
+        ]
+
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=10**6)
+            buffer = bytearray()
+            while self._running:
+                chunk = proc.stdout.read(4096)
+                if not chunk:
+                    break
+                buffer.extend(chunk)
+                a = buffer.find(b'\xff\xd8')
+                b = buffer.find(b'\xff\xd9')
+                if a != -1 and b != -1 and b > a:
+                    jpeg_bytes = bytes(buffer[a:b+2])
+                    buffer = buffer[b+2:]
+                    with self._lock:
+                        self._latest_jpeg = jpeg_bytes
+                        self._last_frame_time = time.time()
+                        self.connection_status = "streaming"
+            proc.terminate()
+        except Exception:
+            pass
+        self._simulation_loop()
+
+    def _ffmpeg_universal_stream_loop(self):
+        """
+        Universal Stream Ingestion Engine with Dynamic Transport Fallback & Resilient Auto-Reconnect.
+        Tries TCP -> UDP -> HTTP tunneling. On disconnect, never permanently degrades to simulation;
+        instead it draws a clean reconnecting overlay and restores the live feed automatically.
+        """
+        transports = ["tcp", "udp", "http"]
+        current_transport_idx = 0
+        backoff = 1.0
+
+        while self._running:
+            transport = transports[current_transport_idx % len(transports)]
+            self.connection_status = "connecting"
+            fps = str(self.camera_info.get("fps", 20))
+
+            cmd = [
+                FFMPEG_BIN,
+                "-hide_banner",
+                "-loglevel", "error",
+                "-rtsp_transport", transport,
+                "-fflags", "nobuffer",
+                "-flags", "low_delay",
+                "-strict", "experimental",
+                "-probesize", "1000000",
+                "-analyzeduration", "1000000",
+                "-i", self.stream_url,
+                "-f", "image2pipe",
+                "-vcodec", "mjpeg",
+                "-q:v", "4",
+                "-r", fps,
+                "-"
+            ]
+
+            proc = None
+            t_connect_start = time.time()
+            frames_received = 0
+
+            try:
+                # Pass stderr=subprocess.DEVNULL to prevent pipe buffer deadlock!
+                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=10**6)
+                buffer = bytearray()
+
+                while self._running:
+                    chunk = proc.stdout.read(4096)
+                    if not chunk:
+                        break
+                    buffer.extend(chunk)
+
+                    # Guard against runaway memory growth on corrupt stream data
+                    if len(buffer) > 2 * 1024 * 1024:
+                        buffer = buffer[-512 * 1024:]
+
+                    a = buffer.find(b'\xff\xd8')
+                    b = buffer.find(b'\xff\xd9')
+                    if a != -1 and b != -1 and b > a:
+                        jpeg_bytes = bytes(buffer[a:b+2])
+                        buffer = buffer[b+2:]
+                        frames_received += 1
+                        with self._lock:
+                            self._latest_jpeg = jpeg_bytes
+                            self._last_frame_time = time.time()
+                            self.connection_status = "streaming"
+                            self.reconnect_count = 0
+                        backoff = 1.0
+
+            except Exception:
+                pass
+            finally:
+                if proc:
+                    try:
+                        proc.terminate()
+                        proc.wait(timeout=1.0)
+                    except Exception:
+                        pass
+
+            if not self._running:
+                break
+
+            # If stream failed very quickly without receiving frames, switch transport protocol
+            session_duration = time.time() - t_connect_start
+            if frames_received < 5:
+                current_transport_idx += 1
+
+            self.reconnect_count += 1
+            self.connection_status = "reconnecting"
+
+            # Display authentic reconnecting HUD overlay
+            ip = self.camera_info.get("ip", "")
+            cam_name = self.camera_info.get("name", "Camera")
+            reconnect_msg = (
+                f"{cam_name.upper()} @ {ip or 'STREAM'}\n"
+                f"SIGNAL LOST • AUTO-RECONNECTING (TRY {self.reconnect_count})...\n"
+                f"PROTOCOL: RTSP/{transport.upper()}"
+            )
+            with self._lock:
+                self._latest_jpeg = self._draw_connecting_frame(reconnect_msg, status_color=(255, 159, 10))
+
+            time.sleep(backoff)
+            backoff = min(5.0, backoff * 1.5)
 
     def _http_snapshot_polling_loop(self):
-        """Polls camera HTTP snapshot endpoint with Digest/Basic auth support."""
-        import urllib.request
-        import urllib.parse
-        import re
-
+        """Polls camera HTTP snapshot endpoint with Digest/Basic auth support and auto-reconnect."""
         ip = self.camera_info.get("ip", "")
         username = self.camera_info.get("username", "admin")
         password = self.camera_info.get("password", "")
@@ -200,10 +491,18 @@ class CameraStreamSession:
         if not snapshot_url and ip:
             if vendor in ("hikvision", "hikvision_dvr"):
                 snapshot_url = f"http://{ip}/ISAPI/Streaming/channels/101/picture"
-            elif vendor == "dahua":
+            elif vendor in ("dahua", "amcrest"):
                 snapshot_url = f"http://{ip}/cgi-bin/snapshot.cgi?channel=1"
             elif vendor in ("gatocam", "xiongmai"):
                 snapshot_url = f"http://{ip}/snapshot.jpg"
+            elif vendor == "axis":
+                snapshot_url = f"http://{ip}/jpg/image.jpg"
+            elif vendor == "reolink":
+                snapshot_url = f"http://{ip}/cgi-bin/api.cgi?cmd=Snap&channel=01&user={username}&password={password}"
+            elif vendor == "esp32_cam":
+                snapshot_url = f"http://{ip}/capture"
+            elif vendor == "ip_webcam":
+                snapshot_url = f"http://{ip}:8080/shot.jpg"
             else:
                 snapshot_url = f"http://{ip}/snapshot.jpg"
 
@@ -211,7 +510,6 @@ class CameraStreamSession:
             self._simulation_loop()
             return
 
-        # Clean snapshot_url: strip embedded credentials to avoid urllib InvalidURL error
         try:
             parsed = urllib.parse.urlparse(snapshot_url)
             if parsed.username:
@@ -221,7 +519,7 @@ class CameraStreamSession:
             
             port_str = f":{parsed.port}" if parsed.port and parsed.port != 80 else ""
             clean_host = parsed.hostname or ip
-            clean_path = parsed.path or "/ISAPI/Streaming/channels/101/picture"
+            clean_path = parsed.path or "/snapshot.jpg"
             clean_url = f"{parsed.scheme or 'http'}://{clean_host}{port_str}{clean_path}"
         except Exception:
             clean_url = re.sub(r'://[^@]+@', '://', snapshot_url)
@@ -232,12 +530,13 @@ class CameraStreamSession:
             if ip:
                 password_mgr.add_password(None, f"http://{ip}/", username, password or "")
                 password_mgr.add_password(None, f"http://{ip}:80/", username, password or "")
+                password_mgr.add_password(None, f"http://{ip}:8080/", username, password or "")
 
         auth_handler = urllib.request.HTTPDigestAuthHandler(password_mgr)
         basic_handler = urllib.request.HTTPBasicAuthHandler(password_mgr)
         opener = urllib.request.build_opener(auth_handler, basic_handler)
 
-        target_fps = max(2, min(15, self.camera_info.get("fps", 10)))
+        target_fps = max(2, min(20, self.camera_info.get("fps", 10)))
         interval = 1.0 / target_fps
         consecutive_fails = 0
 
@@ -247,45 +546,68 @@ class CameraStreamSession:
                 sep = "&" if "?" in clean_url else "?"
                 req_url = f"{clean_url}{sep}t={int(t0 * 1000)}"
                 req = urllib.request.Request(req_url, headers={"User-Agent": "OmniSight/1.0"})
-                with opener.open(req, timeout=4.0) as resp:
+                with opener.open(req, timeout=3.5) as resp:
                     jpeg_bytes = resp.read()
-                    if jpeg_bytes and len(jpeg_bytes) > 500:
+                    if jpeg_bytes and len(jpeg_bytes) > 200:
                         with self._lock:
                             self._latest_jpeg = jpeg_bytes
                             self._last_frame_time = time.time()
+                            self.connection_status = "streaming"
                         consecutive_fails = 0
-            except Exception as e:
+            except Exception:
                 consecutive_fails += 1
                 if consecutive_fails >= 3:
-                    # Draw an informative status frame
+                    self.connection_status = "reconnecting"
                     err_text = f"{self.camera_info.get('name', 'CAMERA')} @ {ip}\nAWAITING PASSWORD IN SETTINGS" if not password else f"CONNECTING TO {ip}...\nCHECK PASSWORD / NETWORK"
                     with self._lock:
                         self._latest_jpeg = self._draw_connecting_frame(err_text)
                     time.sleep(1.0)
 
             elapsed = time.time() - t0
-            sleep_time = max(0.05, interval - elapsed)
+            sleep_time = max(0.04, interval - elapsed)
             time.sleep(sleep_time)
 
-    def _draw_connecting_frame(self, message: str) -> bytes:
+    def _draw_connecting_frame(self, message: str, status_color=(255, 159, 10)) -> bytes:
+        """Renders an Apple Cupertino frosted-dark HUD status frame."""
         width = 854
         height = 480
-        img = Image.new("RGB", (width, height), color=(18, 18, 20))
+        img = Image.new("RGB", (width, height), color=(14, 16, 20))
         draw = ImageDraw.Draw(img)
+
+        # Subtle background grid lines
+        for y in range(0, height, 40):
+            draw.line([(0, y), (width, y)], fill=(20, 24, 30), width=1)
+        for x in range(0, width, 60):
+            draw.line([(x, 0), (x, height)], fill=(20, 24, 30), width=1)
+
+        # Center card container
+        card_w, card_h = 560, 180
+        cx, cy = width // 2, height // 2
+        draw.rectangle([cx - card_w // 2, cy - card_h // 2, cx + card_w // 2, cy + card_h // 2], fill=(22, 26, 32), outline=(40, 48, 60))
+
         # Center status message
         lines = message.split("\n")
-        y = height // 2 - (len(lines) * 12)
+        y = cy - (len(lines) * 14)
         for line in lines:
-            draw.text((width // 2 - len(line) * 4, y), line, fill=(255, 159, 10))
-            y += 24
+            draw.text((cx - len(line) * 4.5, y), line, fill=status_color)
+            y += 26
+
+        # Top-Left Camera Name
         draw.text((20, 20), self.camera_info.get("name", "Camera").upper(), fill=(255, 255, 255))
-        draw.text((20, height - 30), "OMNISIGHT // STANDALONE PROXY", fill=(100, 110, 130))
+        draw.text((20, 40), f"VENDOR: {self.camera_info.get('vendor', 'GENERIC').upper()} // PROTOCOL PROBE", fill=(120, 130, 150))
+
+        # Bottom watermark
+        draw.text((20, height - 30), "OMNISIGHT // UNIVERSAL SURVEILLANCE HUB", fill=(80, 90, 110))
+        now_str = time.strftime("%Y-%m-%d  %H:%M:%S", time.localtime())
+        draw.text((width - 200, height - 30), now_str, fill=(80, 90, 110))
+
         buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=75)
+        img.save(buf, format="JPEG", quality=80)
         return buf.getvalue()
 
     def _simulation_loop(self):
         """Generates procedural surveillance frames with vendor-authentic OSDs."""
+        self.connection_status = "streaming"
         frame_interval = 1.0 / max(10, self.camera_info.get("fps", 25))
         frame_count = 0
 
@@ -303,50 +625,39 @@ class CameraStreamSession:
             time.sleep(sleep_time)
 
     def _generate_simulated_frame(self, frame_idx: int) -> bytes:
-        """Draws realistic dark surveillance visuals with dynamic overlays."""
+        """Draws realistic surveillance visuals with dynamic overlays."""
         width = 854
         height = 480
         vendor = self.camera_info.get("vendor", "hikvision")
         cam_name = self.camera_info.get("name", "Surveillance Cam")
         
-        # Base scene background: deep gothic security canvas
         img = Image.new("RGB", (width, height), color=(12, 14, 18))
         draw = ImageDraw.Draw(img)
 
-        # Draw procedural grid / architectural scene based on vendor / camera group
         t = time.time()
-        # Simulated panning offset
-        offset_x = int(self.pan * 2)
-        offset_y = int(self.tilt * 2)
+        offset_x = int(self.pan * 2.0)
+        offset_y = int(self.tilt * 2.0)
 
-        # Perspective ground grid
         horizon = height // 2 + offset_y
         draw.line([(0, horizon), (width, horizon)], fill=(30, 36, 46), width=2)
         
-        # Grid rays
         for i in range(-5, 15):
             gx = width // 2 + (i * 90) + offset_x
             draw.line([(gx, horizon), (gx * 1.5 - (width * 0.25), height)], fill=(20, 26, 35), width=1)
 
-        # Draw architectural silhouettes (buildings / perimeter fence)
         fence_y = horizon + 30
         for fx in range(-100, width + 100, 40):
             fx_adj = fx + (offset_x % 40)
             draw.line([(fx_adj, fence_y - 25), (fx_adj, fence_y + 40)], fill=(35, 42, 54), width=2)
             draw.line([(fx_adj - 20, fence_y - 15), (fx_adj + 20, fence_y - 15)], fill=(28, 34, 45), width=1)
 
-        # Draw moving target (vehicle / pedestrian / security patrol / feline)
         cycle = (t * 0.4) % (math.pi * 2)
         target_world_x = width / 2 + math.sin(cycle) * 260
         target_world_y = horizon + 40 + math.cos(cycle * 0.5) * 20
 
-        # Panning and tilting shifts view relative to world coordinates
-        offset_x = int(self.pan * 2.0)
-        offset_y = int(self.tilt * 2.0)
         target_x = int(target_world_x - offset_x)
         target_y = int(target_world_y - offset_y)
 
-        # Autonomous PTZ Sentry Auto-Tracking loop
         if self.auto_tracking:
             cx_target = width // 2
             cy_target = horizon + 40
@@ -358,118 +669,97 @@ class CameraStreamSession:
             if abs(err_y) > 6:
                 step_y = (err_y / 50.0) * 0.6
                 self.tilt = max(-90.0, min(90.0, self.tilt - step_y))
-            # Refresh coordinates after servo step
             offset_x = int(self.pan * 2.0)
             offset_y = int(self.tilt * 2.0)
             target_x = int(target_world_x - offset_x)
             target_y = int(target_world_y - offset_y)
 
-        # Target bounding box (AI Detection)
         box_w, box_h = 70, 90
         x1, y1 = target_x - box_w // 2, target_y - box_h // 2
         x2, y2 = x1 + box_w, y1 + box_h
 
-        # Vendor specific HUD colors & styling
-        if vendor == "hikvision":
-            osd_color = (255, 255, 255) # Classic crisp white Hikvision font
-            accent_color = (220, 53, 69) # Red alarm
-            ai_color = (255, 193, 7)    # AcuSense Target Gold
+        # Vendor specific styling
+        if vendor in ("hikvision", "hikvision_dvr"):
+            osd_color = (255, 255, 255)
+            ai_color = (255, 193, 7)
             vendor_tag = "HIKVISION DS-2CD • AcuSense AI"
-        elif vendor == "dahua":
+        elif vendor in ("dahua", "amcrest"):
             osd_color = (240, 240, 240)
-            accent_color = (255, 69, 0)
-            ai_color = (0, 230, 118)     # Dahua WizSense Green Box
-            vendor_tag = "DAHUA WizSense IPC • SMD 4.0"
-        elif vendor == "xiongmai":
-            osd_color = (0, 255, 0)      # Classic retro green Chinese OSD
-            accent_color = (255, 0, 0)
+            ai_color = (0, 230, 118)
+            vendor_tag = "DAHUA WizSense / AMCREST • SMD 4.0"
+        elif vendor in ("xiongmai", "xiongmai_dvr"):
+            osd_color = (0, 255, 0)
             ai_color = (0, 255, 0)
             vendor_tag = "XM NetSurveillance • HiSilicon H.265+"
-        elif vendor == "tapo":
+        elif vendor in ("tapo", "kasa"):
             osd_color = (255, 255, 255)
-            accent_color = (0, 150, 255)
             ai_color = (0, 200, 255)
-            vendor_tag = "TP-LINK TAPO • Smart AI Tracking"
+            vendor_tag = "TP-LINK TAPO • Smart AI Detection"
+        elif vendor == "axis":
+            osd_color = (255, 255, 255)
+            ai_color = (255, 204, 0)
+            vendor_tag = "AXIS COMMUNICATIONS • VAPIX Analytics"
+        elif vendor == "reolink":
+            osd_color = (240, 240, 240)
+            ai_color = (0, 180, 255)
+            vendor_tag = "REOLINK AI • Person & Vehicle Detection"
+        elif vendor == "usb_webcam":
+            osd_color = (255, 255, 255)
+            ai_color = (52, 199, 89)
+            vendor_tag = "LOCAL HARDWARE WEBCAM • DirectShow / V4L2"
+        elif vendor == "browser_node":
+            osd_color = (255, 255, 255)
+            ai_color = (0, 200, 255)
+            vendor_tag = "BROWSER CAMERA NODE • WebRTC Ingestion"
         else:
             osd_color = (220, 220, 220)
-            accent_color = (180, 80, 255)
             ai_color = (180, 80, 255)
-            vendor_tag = "OMNISIGHT UNIVERSAL NVR • Protocol Stream"
+            vendor_tag = "OMNISIGHT UNIVERSAL NVR • Universal Hub"
 
-        # Draw AI motion detection box on target
         draw.rectangle([x1, y1, x2, y2], outline=ai_color, width=2)
-        # Target label
         draw.rectangle([x1, y1 - 18, x1 + 65, y1], fill=(15, 18, 24))
         draw.text((x1 + 4, y1 - 16), "OBJECT 98%", fill=ai_color)
 
-        # Crosshairs in center
         cx, cy = width // 2, height // 2
         draw.line([(cx - 15, cy), (cx + 15, cy)], fill=(60, 70, 90), width=1)
         draw.line([(cx, cy - 15), (cx, cy + 15)], fill=(60, 70, 90), width=1)
         draw.arc([cx - 30, cy - 30, cx + 30, cy + 30], start=0, end=360, fill=(40, 48, 62), width=1)
 
-        # Auto-Tracking Sentry Lock HUD
         if self.auto_tracking:
             track_color = (52, 199, 89)
             draw.line([(cx, cy), (target_x, target_y)], fill=track_color, width=1)
-            clen = 12
-            draw.line([(x1, y1), (x1 + clen, y1)], fill=track_color, width=2)
-            draw.line([(x1, y1), (x1, y1 + clen)], fill=track_color, width=2)
-            draw.line([(x2, y1), (x2 - clen, y1)], fill=track_color, width=2)
-            draw.line([(x2, y1), (x2, y1 + clen)], fill=track_color, width=2)
-            draw.line([(x1, y2), (x1 + clen, y2)], fill=track_color, width=2)
-            draw.line([(x1, y2), (x1, y2 - clen)], fill=track_color, width=2)
-            draw.line([(x2, y2), (x2 - clen, y2)], fill=track_color, width=2)
-            draw.line([(x2, y2), (x2, y2 - clen)], fill=track_color, width=2)
-            draw.text((x1, y1 - 32), "🎯 AUTO-TRACK LOCKED", fill=track_color)
-            draw.rectangle([cx - 95, 68, cx + 95, 88], fill=(15, 30, 20), outline=track_color)
             draw.text((cx - 85, 72), "🎯 AUTO-TRACK: SENTRY LOCKED", fill=track_color)
 
-        # Intercom Talkback Live Audio HUD
         if self.intercom_active:
             if time.time() - self.last_audio_tx < 2.5:
                 draw.rectangle([cx - 130, 95, cx + 130, 118], fill=(10, 32, 18), outline=(52, 199, 89))
                 draw.text((cx - 120, 100), "🎙️ TALKBACK: LIVE AUDIO TX", fill=(52, 199, 89))
-                # Dynamic VU audio meter bars
-                vu_base = int(6 + 8 * abs(math.sin(t * 14)))
-                for vi in range(6):
-                    vh = max(2, int(vu_base + 5 * math.sin(t * 12 + vi)))
-                    draw.rectangle([cx + 90 + (vi * 5), 114 - vh, cx + 93 + (vi * 5), 114], fill=(52, 199, 89))
             else:
                 self.intercom_active = False
 
-        # Top-Left OSD: Camera Name & Vendor tag
         draw.text((20, 15), cam_name.upper(), fill=osd_color)
         draw.text((20, 32), vendor_tag, fill=(140, 150, 170))
         
-        # Real-time Bitrate & Resolution
         kbps = 2048 + int(math.sin(t * 2) * 280)
         draw.text((20, 50), f"{self.camera_info.get('resolution', '1920x1080')}  {self.camera_info.get('fps', 25)} FPS  {kbps} kbps", fill=(100, 120, 140))
 
-        # Top-Right OSD: Dynamic Timestamp & REC Indicator
         time_str = time.strftime("%Y-%m-%d  %H:%M:%S", time.localtime(t))
         millis = int((t % 1) * 1000)
         full_time_str = f"{time_str}.{millis:03d}"
         
-        # Blinking REC dot
         if int(t * 2) % 2 == 0:
             draw.ellipse([width - 240, 18, width - 228, 30], fill=(230, 40, 40))
             draw.text((width - 222, 16), "REC", fill=(230, 40, 40))
 
         draw.text((width - 175, 16), full_time_str, fill=osd_color)
 
-        # Bottom-Left OSD: PTZ telemetry
         ptz_str = f"PAN: {self.pan:+06.1f}°  TILT: {self.tilt:+05.1f}°  ZOOM: {self.zoom:.1f}x"
         draw.text((20, height - 35), ptz_str, fill=(140, 150, 170))
-
-        # Bottom-Right OSD: OmniSight Brand watermark
         draw.text((width - 160, height - 35), "OMNISIGHT // SECURE", fill=(70, 80, 100))
 
-        # Scanline effect (subtle gothic monitor overlay)
         for sl in range(0, height, 4):
             draw.line([(0, sl), (width, sl)], fill=(0, 0, 0, 30))
 
-        # Encode to JPEG
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=80)
         return buf.getvalue()
@@ -480,7 +770,6 @@ class CameraStreamSession:
         height = 480
         t = float(target_time)
         now = time.time()
-        # If passed seconds within day (0..86400), convert to today's epoch
         if t <= 86400:
             today_start = now - (now % 86400)
             t = today_start + t
@@ -489,12 +778,10 @@ class CameraStreamSession:
         hour = local_tm.tm_hour
         is_night = (hour < 6 or hour >= 19)
 
-        # Base scene: night IR black-and-white vs daylight
         bg_color = (10, 12, 14) if is_night else (18, 22, 28)
         img = Image.new("RGB", (width, height), color=bg_color)
         draw = ImageDraw.Draw(img)
 
-        # Ground grid & horizon
         horizon = height // 2
         grid_color = (25, 30, 38) if is_night else (45, 55, 70)
         draw.line([(0, horizon), (width, horizon)], fill=grid_color, width=2)
@@ -502,12 +789,10 @@ class CameraStreamSession:
             gx = width // 2 + (i * 90)
             draw.line([(gx, horizon), (gx * 1.5 - (width * 0.25), height)], fill=grid_color, width=1)
 
-        # Architectural structures
         fence_y = horizon + 30
         for fx in range(-100, width + 100, 40):
             draw.line([(fx, fence_y - 25), (fx, fence_y + 40)], fill=(35, 42, 54), width=2)
 
-        # Target in archive
         cycle = (t * 0.3) % (math.pi * 2)
         target_x = int(width / 2 + math.sin(cycle) * 220)
         target_y = int(horizon + 40 + math.cos(cycle * 0.5) * 20)
@@ -518,64 +803,20 @@ class CameraStreamSession:
         draw.rectangle([x1, y1, x2, y2], outline=target_color, width=2)
         draw.text((x1 + 4, y1 - 16), "RECORDED MOTION", fill=target_color)
 
-        # Top Banner: PLAYBACK ARCHIVE
         draw.rectangle([0, 0, width, 32], fill=(22, 22, 28))
         draw.text((20, 9), f"⏪ PLAYBACK ARCHIVE • {self.camera_info.get('name', 'Camera').upper()}", fill=(255, 149, 0))
         historical_str = time.strftime("%Y-%m-%d  %H:%M:%S", local_tm)
         draw.text((width - 260, 9), f"RECORDED: {historical_str}", fill=(255, 255, 255))
 
-        # Bottom Telemetry & Status
         draw.text((20, height - 30), f"TIMELINE SCRUB • {self.night_vision.upper()} PROFILE • 1.0X SPEED", fill=(120, 130, 150))
         draw.text((width - 240, height - 30), "OMNISIGHT HISTORICAL SYNC", fill=(90, 100, 120))
 
-        # Subtle scanlines
         for sl in range(0, height, 4):
             draw.line([(0, sl), (width, sl)], fill=(0, 0, 0, 30))
 
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=80)
         return buf.getvalue()
-
-    def _ffmpeg_rtsp_loop(self):
-        """Ingests live RTSP feed from physical cameras using ffmpeg."""
-        cmd = [
-            FFMPEG_BIN,
-            "-hide_banner",
-            "-loglevel", "error",
-            "-rtsp_transport", "tcp",
-            "-i", self.stream_url,
-            "-f", "image2pipe",
-            "-vcodec", "mjpeg",
-            "-q:v", "4",
-            "-r", str(self.camera_info.get("fps", 20)),
-            "-"
-        ]
-        
-        try:
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=10**6)
-            buffer = bytearray()
-            
-            while self._running:
-                chunk = proc.stdout.read(4096)
-                if not chunk:
-                    break
-                buffer.extend(chunk)
-                
-                # Look for JPEG SOI and EOI markers
-                a = buffer.find(b'\xff\xd8')
-                b = buffer.find(b'\xff\xd9')
-                if a != -1 and b != -1 and b > a:
-                    jpeg_bytes = bytes(buffer[a:b+2])
-                    buffer = buffer[b+2:]
-                    with self._lock:
-                        self._latest_jpeg = jpeg_bytes
-                        self._last_frame_time = time.time()
-            
-            proc.terminate()
-        except Exception as e:
-            print(f"[StreamProxy] Error in ffmpeg RTSP loop for {self.camera_id}: {e}")
-            # Fallback to simulation
-            self._simulation_loop()
 
 
 class StreamManager:
@@ -593,12 +834,10 @@ class StreamManager:
             existing_ids = set(self.sessions.keys())
             current_ids = {c["id"] for c in cameras}
 
-            # Remove obsolete sessions
             for cid in existing_ids - current_ids:
                 self.sessions[cid].stop()
                 del self.sessions[cid]
 
-            # Add new sessions
             for c in cameras:
                 cid = c["id"]
                 if cid not in self.sessions:

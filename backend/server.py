@@ -14,18 +14,21 @@ import urllib.request
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from typing import Dict, Any, Optional
 
+# Ensure backend directory is in sys.path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 try:
     from .config_manager import ConfigManager
     from .stream_proxy import StreamManager
     from .vendor_presets import VENDOR_PRESETS, build_stream_url
-    from .discovery import run_full_discovery
+    from .discovery import run_full_discovery, probe_camera_connection, list_system_webcams
     from .recorder import RecorderManager
     from .cloud_relay import CloudRelayManager
 except (ImportError, ValueError):
     from config_manager import ConfigManager
     from stream_proxy import StreamManager
     from vendor_presets import VENDOR_PRESETS, build_stream_url
-    from discovery import run_full_discovery
+    from discovery import run_full_discovery, probe_camera_connection, list_system_webcams
     from recorder import RecorderManager
     from cloud_relay import CloudRelayManager
 
@@ -408,6 +411,12 @@ class OmniSightHandler(BaseHTTPRequestHandler):
             self.send_json(result)
             return
 
+        # API: Enumerate System Webcams (DirectShow / V4L2)
+        if path == "/api/system/webcams":
+            cams = list_system_webcams()
+            self.send_json(cams)
+            return
+
         # API: Snapshots list
         if path == "/api/snapshots":
             snaps = recorder_manager.list_snapshots()
@@ -728,6 +737,52 @@ class OmniSightHandler(BaseHTTPRequestHandler):
             layout = body_data.get("layout", "2x2")
             config_manager.set_layout(layout)
             self.send_json({"status": "ok", "layout": layout})
+            return
+
+        # API: Universal Camera Prober & Auto-Detection Diagnostic
+        if path == "/api/cameras/probe":
+            ip = body_data.get("ip", "").strip()
+            port = body_data.get("port")
+            if port:
+                try:
+                    port = int(port)
+                except ValueError:
+                    port = None
+            username = body_data.get("username", "").strip()
+            password = body_data.get("password", "")
+            vendor_hint = body_data.get("vendor", "")
+
+            probe_res = probe_camera_connection(
+                ip=ip,
+                port=port,
+                username=username,
+                password=password,
+                vendor_hint=vendor_hint
+            )
+            self.send_json(probe_res)
+            return
+
+        # API: Ingest Live Frame from Browser Camera Node
+        if path.startswith("/api/cameras/") and path.endswith("/ingest"):
+            cam_id = path.split("/")[3]
+            session = stream_manager.get_session(cam_id)
+            if not session:
+                self.send_json({"error": "Camera not found"}, 404)
+                return
+            frame_b64 = body_data.get("frame_base64", "")
+            if frame_b64:
+                import base64
+                if "," in frame_b64:
+                    frame_b64 = frame_b64.split(",", 1)[1]
+                try:
+                    raw_bytes = base64.b64decode(frame_b64)
+                    session.push_frame(raw_bytes)
+                    self.send_json({"status": "ok", "bytes": len(raw_bytes)})
+                    return
+                except Exception as e:
+                    self.send_json({"error": f"Failed to decode frame: {e}"}, 400)
+                    return
+            self.send_json({"error": "frame_base64 is required"}, 400)
             return
 
         self.send_json({"error": "Endpoint not found"}, 404)

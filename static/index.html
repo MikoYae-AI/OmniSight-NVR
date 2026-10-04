@@ -79,6 +79,9 @@
           <button class="btn-action btn-warning" id="btnCamControl" title="Control camera hardware directly with zero Internet Explorer or Edge">
             <span class="icon">⚙️</span> Zero-IE Control
           </button>
+          <button class="btn-action btn-secondary" id="btnBrowserNode" title="Stream Phone or Laptop Camera into Matrix as a Surveillance Node">
+            <span class="icon">📱</span> Camera Node
+          </button>
           <button class="btn-action btn-secondary" id="btnOpenGallery">
             <span class="icon">📷</span> Gallery
           </button>
@@ -396,21 +399,63 @@
           <div class="form-group flex-2">
             <label for="camVendor">Camera Brand / Architecture</label>
             <select id="camVendor" name="vendor" class="select-vendor">
-              <option value="hikvision">Hikvision (DS-2CD / ColorVu / AcuSense)</option>
-              <option value="hikvision_dvr">Hikvision CCTV DVR / TurboHD (Analog BNC)</option>
-              <option value="xiongmai">Xiongmai / XM / CMS (Generic Chinese Cam)</option>
-              <option value="xiongmai_dvr">Chinese AHD/TVI CCTV DVR (NetSurveillance)</option>
-              <option value="gatocam">Shenzhen GatoCam (Indoor / Outdoor / PTZ)</option>
-              <option value="dahua">Dahua / Imou (IPC / WizSense / XVR)</option>
-              <option value="tapo">TP-Link Tapo (C100 / C200 / C310)</option>
-              <option value="reolink">Reolink (RLC / Duo / E1)</option>
-              <option value="yoosee">Yoosee / Cooau / VStarcam</option>
-              <option value="v380">V380 / V380 Pro</option>
-              <option value="legacy_activex">Legacy Camera (Requires Internet Explorer / ActiveX)</option>
-              <option value="generic_onvif">Generic ONVIF Camera</option>
-              <option value="generic_rtsp">Custom RTSP Stream</option>
-              <option value="mjpeg_http">HTTP MJPEG / ESP32-CAM</option>
-              <option value="simulated">OmniSight Virtual Generator (Simulation)</option>
+              <optgroup label="🌐 Mainstream Commercial & Enterprise">
+                <option value="hikvision">Hikvision (DS-2CD / ColorVu / AcuSense)</option>
+                <option value="dahua">Dahua / Imou (IPC / WizSense / TiOC)</option>
+                <option value="amcrest">Amcrest (IPC / ProHD / 4K / Doorbell)</option>
+                <option value="uniview">Uniview (UNV / Tri-Guard / Prime)</option>
+                <option value="axis">Axis Communications (VAPIX / M / P / Q)</option>
+                <option value="hanwha">Hanwha Techwin / Wisenet / Samsung</option>
+                <option value="bosch">Bosch Security (FLEXIDOME / DINION)</option>
+                <option value="sony">Sony Surveillance (SNC / IPELA)</option>
+                <option value="panasonic">Panasonic / i-PRO (WV Series)</option>
+                <option value="vivotek">Vivotek (FD / IB / FE Series)</option>
+                <option value="milesight">Milesight (Mini / Pro / Vandal Dome)</option>
+                <option value="mobotix">Mobotix (MxPEG / IP)</option>
+              </optgroup>
+              <optgroup label="🏡 Consumer & Smart Home">
+                <option value="icsee">ICSee / XMeye / iCSee Pro (App-Paired IP Camera)</option>
+                <option value="ezviz">EZVIZ (Hikvision App-Paired Camera)</option>
+                <option value="imou">Imou Life (Dahua App-Paired Camera)</option>
+                <option value="tapo">TP-Link Tapo (C100 / C200 / C310 / C500)</option>
+                <option value="kasa">TP-Link Kasa (KC100 / KC200 / KC420WS)</option>
+                <option value="reolink">Reolink (RLC / Duo / TrackMix / E1)</option>
+                <option value="wyze">Wyze Cam (v2 / v3 / v4 / Pan / Bridge)</option>
+                <option value="eufy">Eufy Security (SoloCam / 2K / Outdoor)</option>
+                <option value="foscam">Foscam (R2 / FI98 / G4 / VD1 / X4)</option>
+                <option value="tuya">Tuya / Smart Life / Nedis (Smart Wi-Fi)</option>
+                <option value="yoosee">Yoosee / Cooau / VStarcam</option>
+                <option value="v380">V380 / V380 Pro (Macro-Video)</option>
+                <option value="v360">V360 Pro / Qianniao (CFEO / Cloudbirds / KeepEyes)</option>
+                <option value="srihome">SriHome / Sricam (SP017 / SH029)</option>
+                <option value="dlink">D-Link (DCS Series / mydlink)</option>
+                <option value="unifi">Ubiquiti UniFi Protect (RTSP Re-stream)</option>
+              </optgroup>
+              <optgroup label="📼 CCTV DVRs & Coaxial BNC Hubs">
+                <option value="hikvision_dvr">Hikvision TurboHD / CCTV DVR (DS-7100 / 7200)</option>
+                <option value="xiongmai_dvr">Chinese AHD / TVI / CVI DVR (NetSurveillance)</option>
+                <option value="zosi_dvr">ZOSI / Lorex / Swann / Night Owl / Annke</option>
+              </optgroup>
+              <optgroup label="🇨🇳 Generic Chinese OEM Chipsets">
+                <option value="xiongmai">Xiongmai / XM / CMS (Generic Chinese Cam)</option>
+                <option value="gatocam">Shenzhen GatoCam (Indoor / Outdoor / PTZ)</option>
+                <option value="legacy_activex">Legacy Camera (Requires Internet Explorer / ActiveX)</option>
+              </optgroup>
+              <optgroup label="🔌 DIY, IoT & Hardware Webcams">
+                <option value="esp32_cam">ESP32-CAM / ESP32-S3 Eye / Seeed Xiao</option>
+                <option value="raspberry_pi">Raspberry Pi Camera / OctoPrint / Prusa</option>
+                <option value="ip_webcam">Android & iOS IP Webcam / DroidCam</option>
+                <option value="usb_webcam">Local USB Webcam / Built-in Camera</option>
+                <option value="browser_node">Browser Camera Node (Stream This Phone/PC)</option>
+              </optgroup>
+              <optgroup label="📡 Universal Protocols & Emulation">
+                <option value="generic_onvif">Generic ONVIF Camera (Profile S / G / T)</option>
+                <option value="generic_rtsp">Custom RTSP Stream (TCP / UDP / Auto)</option>
+                <option value="rtmp_stream">RTMP / RTMPS Live Stream (OBS / Drone)</option>
+                <option value="mjpeg_http">HTTP MJPEG Stream</option>
+                <option value="hls_stream">HLS Stream (.m3u8)</option>
+                <option value="simulated">OmniSight Virtual CCTV Generator (Simulation)</option>
+              </optgroup>
             </select>
           </div>
           <div class="form-group flex-1">
@@ -444,6 +489,76 @@
           <div class="form-group flex-1">
             <label for="camPass">Password</label>
             <input type="password" id="camPass" name="password" placeholder="••••••••">
+          </div>
+        </div>
+
+        <!-- App-Configured Camera Helper (No Password in App) -->
+        <div class="app-helper-section" style="margin-bottom: 12px; background: rgba(59, 130, 246, 0.05); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 10px; padding: 10px 14px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 16px;">📱</span>
+              <div>
+                <span style="font-size: 12px; font-weight: 600; color: #60a5fa;">Paired via Mobile App? (No Password in App)</span>
+                <span style="font-size: 11px; color: var(--text-secondary); display: block;">For ICSee, V380, V360 Pro, Tapo, EZVIZ, Imou, Tuya, Yoosee, Eufy</span>
+              </div>
+            </div>
+            <button type="button" class="btn-action btn-secondary" id="btnToggleAppHelper" style="padding: 4px 10px; font-size: 11px; white-space: nowrap;">
+              App Assistant ▾
+            </button>
+          </div>
+
+          <div id="appHelperDrawer" class="hidden" style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px;">
+            <div class="form-group" style="margin-bottom: 8px;">
+              <label for="appSelector" style="font-size: 11px; color: var(--text-secondary);">Select the mobile app you used to set up this camera:</label>
+              <select id="appSelector" style="font-size: 12px; padding: 6px 10px; width: 100%;">
+                <option value="">-- Choose Your Camera Mobile App --</option>
+                <option value="icsee">ICSee / XMeye / iCSee Pro (Amazon/AliExpress Wi-Fi Cams)</option>
+                <option value="v380">V380 / V380 Pro (Macro-Video PTZ / Bulb / Panoramic)</option>
+                <option value="v360">V360 Pro (Shenzhen Qianniao Xiangyun / CFEO Series / Cloudbirds)</option>
+                <option value="tapo">TP-Link Tapo (C100, C200, C310, C500) &amp; Kasa</option>
+                <option value="ezviz">EZVIZ (Hikvision Smart Cameras)</option>
+                <option value="imou">Imou Life (Dahua Smart Cameras)</option>
+                <option value="yoosee">Yoosee / YYP2P / Cooau</option>
+                <option value="tuya">Tuya / Smart Life / Geeni / Merkury</option>
+                <option value="eufy">Eufy Security (Indoor 2K / SoloCam)</option>
+                <option value="wyze">Wyze Cam (v2 / v3 / v4 / Pan)</option>
+              </select>
+            </div>
+            <div id="appSecretTip" class="hidden" style="background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; padding: 10px; font-size: 11px; line-height: 1.5; color: var(--text-main);">
+              <!-- Dynamically rendered instructions and 1-click auto-fill -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Universal Hardware Auto-Detect & Connection Prober -->
+        <div class="probe-section">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <span style="font-size: 12px; font-weight: 600; color: #fff; display: flex; align-items: center; gap: 6px;">
+                <span style="color: var(--apple-blue);">⚡</span> Universal Hardware Auto-Detect & Test
+              </span>
+              <span style="font-size: 11px; color: var(--text-secondary); display: block; margin-top: 2px;">
+                Probes RTSP candidate paths, ONVIF Profile S, and HTTP snapshots to verify live feed.
+              </span>
+            </div>
+            <button type="button" class="btn-action btn-secondary" id="btnProbeCamera" style="padding: 6px 14px; font-size: 11px; white-space: nowrap;">
+              <span class="icon">⚡</span> Test Connection
+            </button>
+          </div>
+
+          <div id="probeResultBox" class="hidden" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.06);">
+            <div id="probeStatusPill" style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px;">
+              <span class="status-indicator"></span>
+              <span id="probeStatusText" style="font-weight: 600;">Probing device...</span>
+            </div>
+            <div id="probeChips" style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;"></div>
+            <div id="probePreviewContainer" class="hidden" style="display: flex; align-items: center; gap: 12px; background: rgba(0,0,0,0.3); border-radius: 8px; padding: 8px;">
+              <img id="probePreviewImg" src="" alt="Live Camera Test Frame" style="width: 120px; height: 68px; object-fit: cover; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1);">
+              <div style="font-size: 11px; color: var(--text-secondary); line-height: 1.4;">
+                <span style="color: #34c759; font-weight: 600;">✓ Live Frame Verified</span><br>
+                <span id="probePreviewDetails">RTSP Stream Ready</span>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -490,8 +605,11 @@
             <label for="dvrVendor">DVR Architecture</label>
             <select id="dvrVendor" name="vendor" class="select-vendor">
               <option value="hikvision_dvr">Hikvision TurboHD / CCTV DVR (DS-7100 / 7200)</option>
+              <option value="dahua">Dahua XVR / Cooper CCTV DVR (BNC)</option>
               <option value="xiongmai_dvr">Chinese AHD / TVI / CVI DVR (NetSurveillance / H.264 / XM)</option>
-              <option value="dahua">Dahua XVR / Cooper CCTV DVR</option>
+              <option value="amcrest">Amcrest ProHD / NV NVR</option>
+              <option value="zosi_dvr">ZOSI / Lorex / Swann / Night Owl / Annke</option>
+              <option value="uniview">Uniview (UNV) NVR Multi-Channel</option>
             </select>
           </div>
           <div class="form-group flex-1">
@@ -730,23 +848,15 @@
       <div class="modal-body guide-content">
         <div class="guide-grid">
           <div class="guide-card">
-            <h4>Hikvision (DS-2CD / AcuSense / DVR)</h4>
+            <h4>Hikvision (DS-2CD / AcuSense / ColorVu / DVR)</h4>
             <p><strong>RTSP:</strong> <code>rtsp://admin:pass@ip:554/Streaming/Channels/101</code></p>
             <p><strong>DVR Multi-Channel:</strong> BNC Ch 1 = <code>101</code>, Ch 2 = <code>201</code>, Ch 3 = <code>301</code>.</p>
             <p><strong>Snapshot (No IE):</strong> <code>http://ip/ISAPI/Streaming/channels/101/picture</code></p>
-            <p><strong>Quirk:</strong> ONVIF must be enabled in <em>Configuration &gt; Network &gt; Advanced &gt; Integration Protocol</em>.</p>
+            <p><strong>Quirk:</strong> Enable ONVIF in <em>Configuration &gt; Network &gt; Advanced &gt; Integration Protocol</em>.</p>
           </div>
 
           <div class="guide-card">
-            <h4>Xiongmai (XM / NetSurveillance / Chinese DVR)</h4>
-            <p><strong>RTSP:</strong> <code>rtsp://admin:pass@ip:554/live/ch0</code></p>
-            <p><strong>DVR Multi-Channel:</strong> BNC Ch 1 = <code>/live/ch0</code>, Ch 2 = <code>/live/ch1</code>, Ch 3 = <code>/live/ch2</code>.</p>
-            <p><strong>Snapshot (No IE):</strong> <code>http://ip/snapshot.jpg</code></p>
-            <p><strong>Quirk:</strong> Chinese cameras use port <strong>34567</strong> for desktop CMS. Admin password is often blank.</p>
-          </div>
-
-          <div class="guide-card">
-            <h4>Dahua &amp; Imou (IPC / WizSense / XVR)</h4>
+            <h4>Dahua, Imou &amp; Amcrest (IPC / WizSense / XVR)</h4>
             <p><strong>RTSP:</strong> <code>rtsp://admin:pass@ip:554/cam/realmonitor?channel=1&amp;subtype=0</code></p>
             <p><strong>Ports:</strong> 554 (RTSP), 37777 (Dahua Management)</p>
             <p><strong>Snapshot:</strong> <code>http://ip/cgi-bin/snapshot.cgi?channel=1</code></p>
@@ -754,11 +864,115 @@
           </div>
 
           <div class="guide-card">
-            <h4>TP-Link Tapo (C200 / C310)</h4>
+            <h4>Xiongmai (XM / NetSurveillance / Chinese DVR)</h4>
+            <p><strong>RTSP:</strong> <code>rtsp://admin:pass@ip:554/live/ch0</code></p>
+            <p><strong>DVR Multi-Channel:</strong> BNC Ch 1 = <code>/live/ch0</code>, Ch 2 = <code>/live/ch1</code>, Ch 3 = <code>/live/ch2</code>.</p>
+            <p><strong>Snapshot (No IE):</strong> <code>http://ip/snapshot.jpg</code></p>
+            <p><strong>Quirk:</strong> Desktop CMS uses port <strong>34567</strong>. Password is often blank.</p>
+          </div>
+
+          <div class="guide-card" style="border: 1px solid rgba(59, 130, 246, 0.3); background: rgba(59, 130, 246, 0.05);">
+            <h4 style="color: #60a5fa;">📱 App-Configured Cameras (ICSee, V380, V360 Pro, EZVIZ, Imou, Tapo)</h4>
+            <p><strong>ICSee &amp; XMeye:</strong> Connected without password in app. On local LAN: Username <code>admin</code>, Password is <strong>BLANK (empty)</strong>!</p>
+            <p><strong>V380 (Macro-Video):</strong> Port 554 RTSP with username <code>admin</code> and <strong>BLANK password</strong> (or anonymous stream).</p>
+            <p><strong>V360 Pro (Qianniao Xiangyun / CFEO):</strong> Paired via V360 Pro app without password. Local RTSP on port <strong>554</strong> (<code>/live/ch0</code>) or port <strong>8554</strong> (<code>/profile0</code>) with username <code>admin</code> and <strong>BLANK password</strong>. ONVIF on 6688.</p>
+            <p><strong>EZVIZ:</strong> Username <code>admin</code>. Password is the 6-letter <strong>Verification Code</strong> printed on the camera sticker!</p>
+            <p><strong>Imou:</strong> Username <code>admin</code>. Password is the <strong>Safety Code</strong> on the camera bottom label!</p>
+            <p><strong>TP-Link Tapo:</strong> Create a local user in Tapo App &gt; <em>Settings &gt; Advanced Settings &gt; Camera Account</em>.</p>
+          </div>
+
+          <div class="guide-card">
+            <h4>TP-Link Tapo &amp; Kasa (C100, C200, C310, C500)</h4>
             <p><strong>RTSP:</strong> <code>rtsp://user:pass@ip:554/stream1</code></p>
             <p><strong>Ports:</strong> 554 (RTSP), 2020 (ONVIF)</p>
-            <p><strong>Quirk:</strong> Create a local "Camera Account" inside the Tapo mobile app under <em>Device Settings &gt; Advanced Settings &gt; Camera Account</em>.</p>
+            <p><strong>Quirk:</strong> Create a dedicated local "Camera Account" inside the Tapo mobile app under <em>Device Settings &gt; Advanced Settings &gt; Camera Account</em>.</p>
           </div>
+
+          <div class="guide-card">
+            <h4>Reolink (RLC, Duo, TrackMix, E1 Pro)</h4>
+            <p><strong>RTSP:</strong> <code>rtsp://admin:pass@ip:554/h264Preview_01_main</code></p>
+            <p><strong>Ports:</strong> 554 (RTSP), 8000 (ONVIF)</p>
+            <p><strong>Quirk:</strong> Enable RTSP/ONVIF in Reolink Desktop Client under Network Settings.</p>
+          </div>
+
+          <div class="guide-card">
+            <h4>Uniview (UNV / Tri-Guard / Prime)</h4>
+            <p><strong>RTSP:</strong> <code>rtsp://admin:pass@ip:554/unicast/c1/s0/live</code></p>
+            <p><strong>Snapshot:</strong> <code>http://ip/images/snapshot.jpg</code></p>
+            <p><strong>Quirk:</strong> Channel path is c1/s0/live for main and c1/s1/live for sub stream.</p>
+          </div>
+
+          <div class="guide-card">
+            <h4>Axis Communications (VAPIX)</h4>
+            <p><strong>RTSP:</strong> <code>rtsp://root:pass@ip:554/axis-media/media.amp?videocodec=h264</code></p>
+            <p><strong>Snapshot:</strong> <code>http://ip/jpg/image.jpg</code></p>
+            <p><strong>Quirk:</strong> Primary administrator username is <code>root</code>.</p>
+          </div>
+
+          <div class="guide-card">
+            <h4>Wyze Cam &amp; Eufy Security</h4>
+            <p><strong>Wyze RTSP:</strong> <code>rtsp://user:pass@ip:554/live</code> (or via Wyze Bridge :8554)</p>
+            <p><strong>Eufy RTSP:</strong> <code>rtsp://admin:pass@ip:554/live0</code></p>
+            <p><strong>Quirk:</strong> Enable NAS/RTSP in the mobile app settings.</p>
+          </div>
+
+          <div class="guide-card">
+            <h4>ESP32-CAM &amp; Raspberry Pi</h4>
+            <p><strong>ESP32-CAM:</strong> <code>http://ip:80/stream</code> or <code>http://ip:81/stream</code></p>
+            <p><strong>Raspberry Pi / OctoPrint:</strong> <code>http://ip:8080/?action=stream</code></p>
+            <p><strong>Snapshot:</strong> <code>http://ip/capture</code> or <code>/?action=snapshot</code></p>
+          </div>
+
+          <div class="guide-card">
+            <h4>Local USB Webcam &amp; Browser Node</h4>
+            <p><strong>USB Webcam:</strong> Select "Local USB Webcam" or enter <code>webcam://0</code></p>
+            <p><strong>Browser Node:</strong> Click "📱 Camera Node" in top bar to stream phone/laptop into NVR.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Browser Camera Node (Stream Phone / Laptop into NVR) -->
+  <div class="modal-overlay hidden" id="browserNodeModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 20px;">📱</span>
+          <h3 style="margin: 0;">Stream From This Device (Camera Node)</h3>
+        </div>
+        <button class="btn-close" id="btnCloseBrowserNodeModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="section-desc">Turn this smartphone, tablet, or laptop into a live security camera. Video will be broadcast directly into the OmniSight surveillance matrix.</p>
+        
+        <div style="position: relative; width: 100%; height: 240px; background: #0c0e14; border-radius: 12px; overflow: hidden; margin-bottom: 14px; border: 1px solid rgba(255,255,255,0.1);">
+          <video id="nodeVideoPreview" autoplay playsinline muted style="width: 100%; height: 100%; object-fit: cover;"></video>
+          <div id="nodeLiveBadge" class="hidden" style="position: absolute; top: 12px; left: 12px; background: rgba(230, 40, 40, 0.9); color: #fff; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; display: flex; align-items: center; gap: 6px;">
+            <span style="width: 8px; height: 8px; border-radius: 50%; background: #fff; animation: pulse 1s infinite;"></span>
+            BROADCASTING LIVE TO MATRIX
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group flex-2">
+            <label for="nodeCamName">Camera Node Name</label>
+            <input type="text" id="nodeCamName" value="Mobile Sentry Cam" placeholder="Mobile Sentry Cam">
+          </div>
+          <div class="form-group flex-1">
+            <label for="nodeCamFacing">Lens / Facing</label>
+            <select id="nodeCamFacing">
+              <option value="environment" selected>Back Camera</option>
+              <option value="user">Front Camera</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="modal-footer" style="margin-top: 14px;">
+          <button type="button" class="btn-action btn-ghost" id="btnStopBrowserNode">Stop Camera</button>
+          <button type="button" class="btn-action btn-primary" id="btnStartBrowserNode" style="flex: 1; justify-content: center;">
+            <span class="icon">🔴</span> Start Live Surveillance Broadcast
+          </button>
         </div>
       </div>
     </div>
