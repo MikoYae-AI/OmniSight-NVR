@@ -1,0 +1,32 @@
+# OmniSight-NVR systemd unit — for any Linux host with systemd
+# (Debian/Ubuntu, DietPi, Raspberry Pi OS, Arch, ...).
+#
+# On macOS use launchd (or just run ./start.sh), on Windows use Task
+# Scheduler / NSSM, or use the Docker compose setup on any OS.
+#
+# Install:
+#   sudo cp deploy/omnisight.service /etc/systemd/system/omnisight.service
+#   # edit User= and WorkingDirectory= below if your paths differ
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now omnisight
+#   sudo journalctl -u omnisight -f        # watch logs
+#
+# Then open http://<host-ip>:8080 from any device on the LAN, or link the
+# hosted website to this hub via the 🔗 Hub Connector button.
+
+[Unit]
+Description=OmniSight-NVR Universal Surveillance Hub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Adjust these two lines to match your install:
+User=omnisight
+WorkingDirectory=/opt/OmniSight-NVR
+ExecStart=/usr/bin/python3 backend/server.py 8080
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

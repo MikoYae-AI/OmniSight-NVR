@@ -108,6 +108,89 @@ docker compose up -d
 
 *(Note: Docker uses `network_mode: host` to enable local ONVIF UDP multicast discovery and low-latency RTSP streaming).*
 
+### Option 3: Self-host on any machine (cross-platform)
+
+The hub is pure Python standard library + Pillow + optional FFmpeg — it runs the same on
+Linux, macOS, Windows, and Docker. Put it on whatever box sits on the same network as the
+cameras (server, old laptop, mini PC, Raspberry Pi — nothing here is Pi-specific):
+
+**Linux (Debian/Ubuntu/DietPi & friends)**
+```bash
+sudo apt install -y python3 python3-pil ffmpeg
+git clone https://github.com/MikoYae-AI/OmniSight-NVR.git && cd OmniSight-NVR
+./start.sh 8080
+# run 24/7 as a service:
+sudo cp deploy/omnisight.service /etc/systemd/system/ && sudo systemctl daemon-reload
+sudo systemctl enable --now omnisight
+```
+
+**macOS**
+```bash
+brew install ffmpeg          # Pillow ships with most Python 3 installs, else: pip3 install Pillow
+./start.sh 8080
+```
+
+**Windows**
+```powershell
+# Install Python 3.8+ from python.org, then:
+pip install Pillow
+python backend\server.py 8080
+```
+(`google-auth` is only needed if you enable Google login. On Debian bookworm install pip
+packages inside a venv.)
+
+**Tuning on low-power hosts (mini PCs, Raspberry Pi, etc.):**
+
+- **Every camera in `data/cameras.json` starts a worker at boot** — including simulated
+  ones, which render procedural frames with Pillow at their configured `fps`. Delete the
+  demo/simulated cameras you don't need, or they will burn CPU on their own.
+- **RTSP ingest = software H.264 decode + MJPEG re-encode.** On weak CPUs prefer the
+  plugin-free HTTP MJPEG path for Hikvision (`/ISAPI/Streaming/channels/101/httpPreview`)
+  — it needs no decoding at all — or use the **sub-stream** for RTSP
+  (`/Streaming/Channels/102`) and keep `fps` around 10.
+- Keep the host on the same subnet as the cameras and prefer wired networking.
+- Snapshots/recordings write to `data/` — point it at durable storage if you record 24/7
+  (matters especially on SD-card devices).
+
+### 🔗 Hub Connector — link the hosted website to your hub (cross-platform)
+
+The hosted dashboard ([GitHub Pages](https://mikoyae-ai.github.io/OmniSight-NVR/)) can
+attach itself to any hub you run, on any OS — the **🔗 Hub** button opens the connector:
+paste a hub URL and it becomes the website's backend.
+
+| Connector path | URL to paste | Notes |
+|---|---|---|
+| Hub's own tunnel (recommended) | `https://xxxx.trycloudflare.com` | From the hub's **📶 4G Cloud** panel; needs `cloudflared` installed on the hub machine (free, no account) |
+| Tailscale | `http://100.x.y.z:8080` | Open it directly in a browser tab instead of pasting (see below) |
+| LAN | `http://192.168.x.x:8080` | Open it directly in a browser tab (see below) |
+
+Two rules worth knowing:
+
+1. **HTTPS pages can only call HTTPS hubs.** The GitHub Pages site is HTTPS, so the
+   connector accepts `https://` tunnel URLs there. Plain `http://` LAN/Tailscale URLs
+   still work perfectly — just open them directly in a tab: the hub serves the exact same
+   dashboard with the backend underneath.
+2. The connector URL is stored in `localStorage` (`omnisight_hub_url`) per browser; the
+   **✂ Disconnect** button clears it. Quick-tunnel URLs change when the tunnel restarts —
+   for a permanent connector use a named Cloudflare tunnel or Tailscale (both covered in
+   *Remote Access* below).
+
+#### Signing in through the connector (remembered logins)
+
+The connector also takes an optional **username + password**. On Connect, the website
+signs in against the hub (`POST /api/auth/login`) and stores only the returned **session
+token** — never the password — so the site remembers you across visits:
+
+- **Remember me** checked → token kept in `localStorage` (survives browser restarts).
+- Unchecked → token kept in `sessionStorage` (forgotten when the tab closes).
+
+No extra database is needed for this: hub user accounts already live in
+`data/cameras.json` (salted password hashes, default account `admin` — **change the
+default password via 🔑 Password after first login**), and sessions last 24 h or until the
+hub restarts, after which the site simply asks you to sign in again. (If you ever want a
+real database, Python's built-in `sqlite3` is the natural zero-install upgrade path, but
+at NVR scale the JSON store is fine.)
+
 ---
 
 ## 📋 Universal Camera Compatibility Matrix (40+ Brands & Standards)
