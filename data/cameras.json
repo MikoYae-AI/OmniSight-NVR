@@ -2,7 +2,7 @@
   "version": "1.0.0",
   "system_name": "OmniSight-NVR Hub",
   "theme": "dark_gothic",
-  "grid_layout": "2x2",
+  "grid_layout": "1x1",
   "cameras": [
     {
       "id": "cam-hikvision-13",
@@ -20,8 +20,8 @@
       "is_simulated": false,
       "legacy_polling": false,
       "status": "online",
-      "fps": 25,
-      "resolution": "1920x1080",
+      "fps": 15,
+      "resolution": "1280x720",
       "ptz": true,
       "notes": "Hikvision 2MP Cube IP Camera (DS-2CD2420F-IW, R6 Platform)."
     },

@@ -2373,6 +2373,19 @@ if (typeof window !== "undefined") {
   window.setInterval(refreshLiveStatuses, 5000);
 }
 
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && localApiAvailable) {
+      document.querySelectorAll(".camera-card img.video-feed").forEach(img => {
+        const card = img.closest(".camera-card");
+        if (card && card.dataset.id) {
+          img.src = apiUrl(`/api/cameras/${card.dataset.id}/stream?token=${encodeURIComponent(authToken)}&_v=${Date.now()}`);
+        }
+      });
+    }
+  });
+}
+
 // Setup Camera Video Stream Player
 function setupCameraPlayer(cam) {
   const container = document.getElementById(`videoContainer-${cam.id}`);
@@ -2391,11 +2404,18 @@ function setupCameraPlayer(cam) {
   }
 
   if (localApiAvailable) {
-    // Connected to Python server: use native multipart MJPEG
+    // Connected to Python server: use native multipart MJPEG with auto-recovery
     const img = document.createElement("img");
     img.className = "video-feed";
     img.src = apiUrl(`/api/cameras/${cam.id}/stream?token=${encodeURIComponent(authToken)}`);
     img.alt = cam.name;
+    img.onerror = () => {
+      setTimeout(() => {
+        if (img && img.parentElement) {
+          img.src = apiUrl(`/api/cameras/${cam.id}/stream?token=${encodeURIComponent(authToken)}&_r=${Date.now()}`);
+        }
+      }, 1500);
+    };
     container.insertBefore(img, container.firstChild);
     return;
   }

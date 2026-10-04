@@ -898,7 +898,15 @@ class OmniSightHandler(BaseHTTPRequestHandler):
             self.send_error(500, f"Error reading file: {e}")
 
     def serve_mjpeg_stream(self, session):
-        """Streams continuous multipart/x-mixed-replace JPEG frames to client."""
+        """Streams continuous multipart/x-mixed-replace JPEG frames to client with zero-delay socket tuning."""
+        try:
+            import socket
+            self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            # Cap kernel socket send buffer to ~64KB so old frames cannot queue up in transit
+            self.connection.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
+        except Exception:
+            pass
+
         self.send_response(200)
         self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
         self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
@@ -907,22 +915,26 @@ class OmniSightHandler(BaseHTTPRequestHandler):
         self.send_cors_headers()
         self.end_headers()
 
-        target_fps = max(10, session.camera_info.get("fps", 25))
+        cam_fps = int(session.camera_info.get("fps", 15) or 15)
+        target_fps = min(15, max(8, cam_fps))
         frame_interval = 1.0 / target_fps
+        last_frame_bytes = None
 
         try:
             while True:
                 t0 = time.time()
                 frame = session.get_latest_frame()
-                
-                header = (
-                    b"--frame\r\n"
-                    b"Content-Type: image/jpeg\r\n"
-                    b"Content-Length: " + str(len(frame)).encode("ascii") + b"\r\n\r\n"
-                )
-                self.wfile.write(header)
-                self.wfile.write(frame)
-                self.wfile.write(b"\r\n")
+
+                if frame is not last_frame_bytes:
+                    header = (
+                        b"--frame\r\n"
+                        b"Content-Type: image/jpeg\r\n"
+                        b"Content-Length: " + str(len(frame)).encode("ascii") + b"\r\n\r\n"
+                    )
+                    self.wfile.write(header)
+                    self.wfile.write(frame)
+                    self.wfile.write(b"\r\n")
+                    last_frame_bytes = frame
 
                 elapsed = time.time() - t0
                 sleep_time = max(0.01, frame_interval - elapsed)
@@ -930,7 +942,7 @@ class OmniSightHandler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             # Client disconnected gracefully
             pass
-        except Exception as e:
+        except Exception:
             # Handle client close
             pass
 
