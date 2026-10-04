@@ -1802,6 +1802,29 @@ function setHubConnectorBusy(busy) {
   btnConnectHub.textContent = busy ? "Signing in…" : "🔌 Connect & Reload";
 }
 
+function isLoopbackUrl(rawUrl) {
+  try {
+    const parsed = new URL(rawUrl, window.location.href);
+    const host = (parsed.hostname || "").toLowerCase();
+    return host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "::1";
+  } catch (e) {
+    return false;
+  }
+}
+
+function isPageOnLocalOrigin() {
+  const host = (window.location.hostname || "").toLowerCase();
+  return (
+    window.location.protocol === "file:" ||
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host === "[::1]" ||
+    host === "::1" ||
+    host.endsWith(".local") ||
+    /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.|169\.254\.)/.test(host)
+  );
+}
+
 async function connectToHub() {
   const raw = (hubConnectorUrlInput ? hubConnectorUrlInput.value : "").trim();
   if (!raw) {
@@ -1823,9 +1846,9 @@ async function connectToHub() {
   const username = (hubConnectorUserInput ? hubConnectorUserInput.value : "").trim();
   const password = hubConnectorPassInput ? hubConnectorPassInput.value : "";
   const remember = hubConnectorRemember ? hubConnectorRemember.checked : true;
-  const mixedBlock = location.protocol === "https:" && url.protocol === "http:";
+  const mixedBlock = location.protocol === "https:" && url.protocol === "http:" && !isLoopbackUrl(clean);
 
-  // An HTTPS page (e.g. GitHub Pages) can never reach a plain-http hub —
+  // An HTTPS page (e.g. GitHub Pages) can never reach a plain-http LAN hub —
   // with credentials involved, fail fast instead of saving a dead config.
   if (mixedBlock && (username || password)) {
     showNotification(
@@ -1875,6 +1898,17 @@ async function connectToHub() {
       if (hubConnectorPassInput) hubConnectorPassInput.value = ""; // never keep the password in the DOM
       setHubConnectorBusy(false);
     }
+  } else if (!mixedBlock) {
+    // Perform the status check while the user's click gesture is active so any
+    // browser Local Network Access prompt can be answered before reloading.
+    setHubConnectorBusy(true);
+    try {
+      await fetch(`${clean}/api/status`, { cache: "no-cache", mode: "cors" });
+    } catch (e) {
+      // Save anyway so the user can retry after starting the hub or allowing permission.
+    } finally {
+      setHubConnectorBusy(false);
+    }
   }
 
   localStorage.setItem("omnisight_hub_url", clean);
@@ -1908,16 +1942,63 @@ function disconnectHub() {
   location.reload();
 }
 
-// Detect the same-origin service or restore a configured/local Hub. These
-// targeted status checks are separate from the click-to-scan LAN probes; rely
-// on the browser's native permissions behavior and gracefully skip failures.
+function buildStartupHubCandidates(opts) {
+  const options = opts || {};
+  const isGithubPages = options.isGithubPages !== undefined ? options.isGithubPages : IS_GITHUB_PAGES;
+  const savedHub = options.savedHub !== undefined ? options.savedHub : getSavedHubUrl();
+  const permissionState = options.permissionState !== undefined ? options.permissionState : null;
+  const localOrigin = options.localOrigin !== undefined ? options.localOrigin : isPageOnLocalOrigin();
+  const pageProtocol = options.pageProtocol !== undefined ? options.pageProtocol : window.location.protocol;
+  const candidates = [];
+
+  // 1. Same-origin service check never triggers a Local Network Access prompt.
+  if (!isGithubPages) {
+    candidates.push("");
+  }
+
+  // 2. If the browser explicitly denied local-network access, skip cross-origin
+  //    local/loopback probes on startup.
+  if (permissionState === "denied") {
+    return candidates;
+  }
+
+  // 3. Explicitly saved Hub URL: skip only when HTTPS -> plain-HTTP LAN mixed
+  //    content rules are guaranteed to block the request.
+  if (savedHub) {
+    const blockedByMixedContent =
+      pageProtocol === "https:" &&
+      savedHub.startsWith("http://") &&
+      !isLoopbackUrl(savedHub);
+    if (!blockedByMixedContent && !candidates.includes(savedHub)) {
+      candidates.push(savedHub);
+    }
+    return candidates;
+  }
+
+  // 4. Conventional localhost fallback: only probe on startup when the dashboard
+  //    is already on a local origin or when Local Network permission was already
+  //    granted. Never probe both localhost and 127.0.0.1 back-to-back from a
+  //    public origin, which causes duplicate/flickering permission prompts.
+  if (localOrigin || permissionState === "granted") {
+    if (!candidates.includes("http://localhost:8080")) {
+      candidates.push("http://localhost:8080");
+    }
+  }
+
+  return candidates;
+}
+
+// Detect the same-origin service or restore a configured/local Hub without
+// firing unsolicited cross-origin local-network requests that glitch browser prompts.
 async function detectBackend() {
-  const candidates = [
-    "", // relative (localhost or direct tunnel origin)
-    localStorage.getItem("omnisight_hub_url") || "",
-    "http://localhost:8080",
-    "http://127.0.0.1:8080"
-  ].filter((u, i, arr) => arr.indexOf(u) === i && (u !== "" || !IS_GITHUB_PAGES));
+  const permission = await queryBrowserLocalNetworkPermission();
+  const candidates = buildStartupHubCandidates({
+    isGithubPages: IS_GITHUB_PAGES,
+    savedHub: getSavedHubUrl(),
+    permissionState: permission?.state || null,
+    localOrigin: isPageOnLocalOrigin(),
+    pageProtocol: window.location.protocol
+  });
 
   for (const candidate of candidates) {
     try {
@@ -1970,7 +2051,10 @@ async function detectBackend() {
         return;
       }
     } catch (e) {
-      // Continue probing next candidate
+      // If the user denied the browser's Local Network prompt during this check,
+      // stop probing any remaining candidates immediately.
+      const updatedPerm = (await queryBrowserLocalNetworkPermission()) || permission;
+      if (updatedPerm?.state === "denied") break;
     }
   }
 
@@ -2132,9 +2216,10 @@ function renderGrid() {
   if (heroCameraCount) heroCameraCount.textContent = String(cameras.length).padStart(2, "0");
   if (totalCamCount) totalCamCount.textContent = cameras.length;
 
-  // Clear any active snapshot polling intervals
+  // Clear any active snapshot polling intervals or timers
   Object.keys(pollingIntervals).forEach(k => {
     clearInterval(pollingIntervals[k]);
+    clearTimeout(pollingIntervals[k]);
     delete pollingIntervals[k];
   });
 
@@ -2278,7 +2363,7 @@ function setupCameraPlayer(cam) {
     // Connected to Python server: use native multipart MJPEG
     const img = document.createElement("img");
     img.className = "video-feed";
-    img.src = `/api/cameras/${cam.id}/stream?token=${encodeURIComponent(authToken)}`;
+    img.src = apiUrl(`/api/cameras/${cam.id}/stream?token=${encodeURIComponent(authToken)}`);
     img.alt = cam.name;
     container.insertBefore(img, container.firstChild);
     return;
@@ -2297,18 +2382,18 @@ function setupCameraPlayer(cam) {
     return;
   }
 
-  // Legacy Snapshot Polling Mode
-  if (cam.legacy_polling && cam.ip) {
-    const img = document.createElement("img");
-    img.className = "video-feed";
-    img.alt = cam.name;
-    container.insertBefore(img, container.firstChild);
-
+  // Legacy Snapshot Polling Mode (skip pure sim:// cameras so they use the canvas simulator)
+  const isPureSimStream = String(cam.stream_url || "").trim().startsWith("sim://");
+  if (cam.legacy_polling && cam.ip && !isPureSimStream) {
     // Preferred path: let the NVR find and fetch the camera's still-image endpoint.
     // This handles endpoint auto-detection, Digest/Basic auth, and avoids the
     // mixed-content and CORS restrictions that block direct browser -> camera calls.
     if (localApiAvailable) {
-      const proxyUrl = `/api/cameras/${cam.id}/snapshot?token=${encodeURIComponent(authToken)}`;
+      const img = document.createElement("img");
+      img.className = "video-feed";
+      img.alt = cam.name;
+      container.insertBefore(img, container.firstChild);
+      const proxyUrl = apiUrl(`/api/cameras/${cam.id}/snapshot?token=${encodeURIComponent(authToken)}`);
       img.src = `${proxyUrl}&t=${Date.now()}`;
       pollingIntervals[cam.id] = setInterval(() => {
         img.src = `${proxyUrl}&t=${Date.now()}`;
@@ -2316,7 +2401,25 @@ function setupCameraPlayer(cam) {
       return;
     }
 
-    // GitHub Pages mode: no backend, poll the camera directly from the browser.
+    // On an HTTPS page (e.g. GitHub Pages), plain-HTTP camera snapshot URLs are
+    // either blocked by mixed-content rules or auto-upgraded to https:// by
+    // Chromium — which triggers unsolicited Local Network Access prompts on page
+    // load and still fails TLS because cameras on port 80 do not serve HTTPS.
+    // Show the browser-aware fallback immediately instead of spamming LAN IPs.
+    if (window.location.protocol === "https:") {
+      setCameraStatusDot(cam.id, "error", "Direct HTTP blocked on HTTPS page — connect a Local Hub");
+      drawTacticalFallback(container, cam, "ACTIVE POLLING • MIXED CONTENT RESTRICTION");
+      return;
+    }
+
+    const img = document.createElement("img");
+    img.className = "video-feed";
+    img.alt = cam.name;
+    img.style.display = "none";
+    container.insertBefore(img, container.firstChild);
+
+    // Non-HTTPS standalone mode: poll the camera sequentially without overlapping
+    // requests or looping after failure.
     let snapUrl = "";
     if (cam.vendor === "legacy_activex" || cam.vendor === "xiongmai" || cam.vendor === "gatocam") {
       snapUrl = `http://${cam.ip}/webcapture.jpg?command=snap&channel=${cam.channel || 1}`;
@@ -2332,29 +2435,62 @@ function setupCameraPlayer(cam) {
       snapUrl = `http://${cam.ip}/snapshot.jpg`;
     }
 
-    const directCandidates = [
+    const directCandidates = Array.from(new Set([
       snapUrl,
       `http://${cam.ip}/webcapture.jpg?command=snap&channel=${cam.channel || 1}`,
       `http://${cam.ip}/snapshot.jpg`
-    ];
+    ]));
     let candidateIdx = 0;
+    let pollInFlight = false;
+    let pollStopped = false;
 
     function pollFrame() {
+      if (pollStopped || pollInFlight || !container.isConnected) return;
+      pollInFlight = true;
+      const candidateUrl = directCandidates[candidateIdx];
       const testImg = new Image();
-      testImg.onload = () => { img.src = testImg.src; };
+      testImg.onload = () => {
+        pollInFlight = false;
+        if (pollStopped || !container.isConnected) return;
+        img.style.display = "block";
+        img.src = testImg.src;
+        const existingBanner = container.querySelector(".fallback-banner");
+        if (existingBanner) existingBanner.remove();
+        setCameraStatusDot(cam.id, "streaming", "Direct snapshot polling active");
+        pollingIntervals[cam.id] = setTimeout(pollFrame, 1000);
+      };
       testImg.onerror = () => {
+        pollInFlight = false;
+        testImg.onload = null;
+        testImg.onerror = null;
+        try { testImg.src = ""; } catch (e) {}
+        if (pollStopped || !container.isConnected) return;
         if (candidateIdx < directCandidates.length - 1) {
           candidateIdx += 1;
           pollFrame();
           return;
         }
+        pollStopped = true;
+        if (pollingIntervals[cam.id]) {
+          clearTimeout(pollingIntervals[cam.id]);
+          clearInterval(pollingIntervals[cam.id]);
+          delete pollingIntervals[cam.id];
+        }
+        setCameraStatusDot(cam.id, "error", "Camera unreachable or blocked by browser");
         drawTacticalFallback(container, cam, "ACTIVE POLLING • MIXED CONTENT RESTRICTION");
       };
-      testImg.src = `${directCandidates[candidateIdx]}${directCandidates[candidateIdx].includes("?") ? "&" : "?"}t=${Date.now()}`;
+      testImg.src = `${candidateUrl}${candidateUrl.includes("?") ? "&" : "?"}t=${Date.now()}`;
     }
 
-    pollFrame();
-    pollingIntervals[cam.id] = setInterval(pollFrame, 500);
+    queryBrowserLocalNetworkPermission().then((perm) => {
+      if (perm?.state === "denied") {
+        pollStopped = true;
+        setCameraStatusDot(cam.id, "error", "Browser blocked Local Network access");
+        drawTacticalFallback(container, cam, "ACTIVE POLLING • MIXED CONTENT RESTRICTION");
+        return;
+      }
+      pollFrame();
+    });
     return;
   }
 
@@ -2591,19 +2727,23 @@ function populateMixedContentHelp() {
 
 // Fallback visual message
 function drawTacticalFallback(container, cam, message) {
+  const feedImg = container.querySelector("img.video-feed");
+  if (feedImg && !feedImg.getAttribute("src")) {
+    feedImg.style.display = "none";
+  }
   let fb = container.querySelector(".fallback-banner");
   if (!fb) {
     fb = document.createElement("div");
     fb.className = "fallback-banner";
     fb.style.position = "absolute";
     fb.style.inset = "0";
+    fb.style.zIndex = "3";
     fb.style.display = "flex";
     fb.style.flexDirection = "column";
     fb.style.alignItems = "center";
     fb.style.justifyContent = "center";
-    fb.style.background = "rgba(18, 18, 20, 0.95)";
-    fb.style.backdropFilter = "blur(14px)";
-    fb.style.padding = "20px";
+    fb.style.background = "rgba(14, 23, 17, 0.97)";
+    fb.style.padding = "16px";
     fb.style.textAlign = "center";
     const hub = resolveHubOrigin();
     fb.innerHTML = `
@@ -3019,7 +3159,7 @@ function seekPlayback(seconds) {
     if (container) {
       const img = container.querySelector("img.video-feed");
       if (img) {
-        img.src = `/api/cameras/${activePtzCamId}/playback?time=${seconds}&t=${Date.now()}&token=${encodeURIComponent(authToken)}`;
+        img.src = apiUrl(`/api/cameras/${activePtzCamId}/playback?time=${seconds}&t=${Date.now()}&token=${encodeURIComponent(authToken)}`);
       }
     }
   }
@@ -3048,7 +3188,7 @@ function returnToLive() {
     if (container) {
       const img = container.querySelector("img.video-feed");
       if (img) {
-        img.src = `/api/cameras/${activePtzCamId}/stream?token=${encodeURIComponent(authToken)}`;
+        img.src = apiUrl(`/api/cameras/${activePtzCamId}/stream?token=${encodeURIComponent(authToken)}`);
       }
     }
   }
@@ -3336,6 +3476,9 @@ function showBrowserNetworkPermissionDenied(scanStatusMsg, tbody) {
   showNotification("Allow Local Network access for this site in browser settings, then retry the scan.", "warning");
 }
 
+let discoveryScanInProgress = false;
+let discoveryPermissionCleanup = null;
+
 async function startDiscoveryScan() {
   const scanStatusMsg = document.getElementById("scanStatusMsg");
   const tbody = document.getElementById("discoveryTableBody");
@@ -3343,8 +3486,13 @@ async function startDiscoveryScan() {
   const subnetInput = document.getElementById("scanSubnetInput");
   const subnetBase = (subnetInput?.value || "192.168.1").trim();
 
-  if (!scanStatusMsg || !tbody || !scanButton || scanButton.disabled) return;
+  if (!scanStatusMsg || !tbody || !scanButton || scanButton.disabled || discoveryScanInProgress) return;
+  discoveryScanInProgress = true;
   scanButton.disabled = true;
+  if (typeof discoveryPermissionCleanup === "function") {
+    discoveryPermissionCleanup();
+    discoveryPermissionCleanup = null;
+  }
 
   try {
     scanStatusMsg.textContent = "Scanning local subnet for cameras...";
@@ -3377,33 +3525,96 @@ async function startDiscoveryScan() {
       return;
     }
 
-    if (permission?.state === "prompt") {
-      scanStatusMsg.textContent = "Your browser may ask for Local Network access; allow it while the scan runs.";
-    } else if (permission?.state === "granted") {
-      scanStatusMsg.textContent = "Local Network access granted. Scanning subnet…";
-    } else {
-      scanStatusMsg.textContent = window.isSecureContext === false
-        ? "Scanning subnet… this browser may require HTTPS or localhost for its Local Network prompt."
-        : "Scanning subnet… your browser may ask for Local Network access.";
-    }
-
-    tbody.innerHTML = `<tr><td colspan="6" class="empty-state">Probing ${subnetBase}.1–${subnetBase}.35… If your browser asks to access devices on your local network, choose Allow to continue.</td></tr>`;
-
     const detected = [];
     const totalToScan = 35;
-    const probes = [];
-    for (let i = 1; i <= totalToScan; i++) {
-      const ip = `${subnetBase}.${i}`;
-      probes.push(testCameraHostInBrowser(ip).then(dev => {
-        if (dev) {
-          detected.push(dev);
-          renderDiscoveredDevices(detected, "Browser LAN Probe");
+    let startHostIndex = 1;
+
+    // Never dispatch 35 local-network requests simultaneously while the browser's
+    // Local Network Access permission is still in "prompt" / undecided state.
+    // Sending one initial probe first lets the browser display a single steady
+    // permission prompt without 34 competing parallel requests glitching it.
+    if (permission?.state !== "granted") {
+      scanStatusMsg.textContent = permission?.state === "prompt"
+        ? "Your browser may ask for Local Network access; allow it while the scan runs."
+        : (window.isSecureContext === false
+          ? "Scanning subnet… this browser may require HTTPS or localhost for its Local Network prompt."
+          : "Scanning subnet… your browser may ask for Local Network access.");
+      tbody.innerHTML = `<tr><td colspan="6" class="empty-state">Probing ${subnetBase}.1… If your browser asks to access devices on your local network, choose Allow to continue.</td></tr>`;
+
+      const firstDev = await testCameraHostInBrowser(`${subnetBase}.1`, {
+        timeoutMs: 15000,
+        permission
+      });
+      if (firstDev) {
+        detected.push(firstDev);
+        renderDiscoveredDevices(detected, "Browser LAN Probe");
+      }
+
+      const afterFirstPermission = (await queryBrowserLocalNetworkPermission()) || permission;
+      if (afterFirstPermission?.state === "denied") {
+        showBrowserNetworkPermissionDenied(scanStatusMsg, tbody);
+        return;
+      }
+
+      // If the browser exposes the permission state and it is still "prompt",
+      // either the prompt is still open waiting on the user or it was dismissed.
+      // Do NOT fire 34 more probes right now (which would re-pop/glitch the prompt
+      // 34 times in a row); instead wait for the user to choose Allow.
+      if (afterFirstPermission?.state === "prompt") {
+        scanStatusMsg.textContent = "Waiting for Local Network permission — choose Allow in the browser prompt.";
+        tbody.innerHTML = `<tr><td colspan="6" class="empty-state">Waiting for your browser's Local Network permission prompt. Choose <strong>Allow</strong> in the address-bar prompt (or click <strong>Run Network Scan</strong> again after allowing).</td></tr>`;
+        if (typeof afterFirstPermission.addEventListener === "function") {
+          const onPermChange = () => {
+            afterFirstPermission.removeEventListener("change", onPermChange);
+            discoveryPermissionCleanup = null;
+            if (afterFirstPermission.state === "granted") {
+              startDiscoveryScan();
+            } else if (afterFirstPermission.state === "denied") {
+              showBrowserNetworkPermissionDenied(scanStatusMsg, tbody);
+            }
+          };
+          afterFirstPermission.addEventListener("change", onPermChange);
+          discoveryPermissionCleanup = () => afterFirstPermission.removeEventListener("change", onPermChange);
         }
-      }));
+        return;
+      }
+
+      startHostIndex = 2;
+    } else {
+      scanStatusMsg.textContent = "Local Network access granted. Scanning subnet…";
     }
 
-    await Promise.all(probes);
-    if (permission?.state === "denied") {
+    if (!detected.length) {
+      tbody.innerHTML = `<tr><td colspan="6" class="empty-state">Probing ${subnetBase}.${startHostIndex}–${subnetBase}.${totalToScan}… If your browser asks to access devices on your local network, choose Allow to continue.</td></tr>`;
+    }
+
+    const batchSize = 6;
+    for (let batchStart = startHostIndex; batchStart <= totalToScan; batchStart += batchSize) {
+      const currentPermission = (await queryBrowserLocalNetworkPermission()) || permission;
+      if (currentPermission?.state === "denied") {
+        showBrowserNetworkPermissionDenied(scanStatusMsg, tbody);
+        return;
+      }
+
+      const batchEnd = Math.min(totalToScan, batchStart + batchSize - 1);
+      scanStatusMsg.textContent = `Scanning ${subnetBase}.${batchStart}–${subnetBase}.${batchEnd}…`;
+      const batchProbes = [];
+      for (let i = batchStart; i <= batchEnd; i++) {
+        const ip = `${subnetBase}.${i}`;
+        batchProbes.push(
+          testCameraHostInBrowser(ip, { timeoutMs: 2500, permission: currentPermission }).then(dev => {
+            if (dev) {
+              detected.push(dev);
+              renderDiscoveredDevices(detected, "Browser LAN Probe");
+            }
+          })
+        );
+      }
+      await Promise.all(batchProbes);
+    }
+
+    const finalPermission = (await queryBrowserLocalNetworkPermission()) || permission;
+    if (finalPermission?.state === "denied") {
       showBrowserNetworkPermissionDenied(scanStatusMsg, tbody);
       return;
     }
@@ -3413,20 +3624,44 @@ async function startDiscoveryScan() {
       ? `Browser scan complete. Found ${detected.length} device(s).`
       : "No devices responded. Check the subnet and browser permission, or connect a Local Hub if direct LAN requests are blocked.";
   } finally {
+    discoveryScanInProgress = false;
     scanButton.disabled = false;
   }
 }
 
-function testCameraHostInBrowser(ip) {
+function testCameraHostInBrowser(ip, opts) {
+  const options = opts || {};
+  const timeoutMs = typeof options.timeoutMs === "number" ? options.timeoutMs : 15000;
+  const permission = options.permission || null;
+
   return new Promise((resolve) => {
     const img = new Image();
     let resolved = false;
+
+    const onPermissionChange = () => {
+      if (permission?.state === "denied") {
+        finish(null);
+      }
+    };
+
     const finish = (device) => {
       if (resolved) return;
       resolved = true;
       clearTimeout(timeoutId);
+      if (permission && typeof permission.removeEventListener === "function") {
+        permission.removeEventListener("change", onPermissionChange);
+      }
+      img.onload = null;
+      img.onerror = null;
+      try {
+        img.src = "";
+      } catch (e) {}
       resolve(device);
     };
+
+    if (permission && typeof permission.addEventListener === "function") {
+      permission.addEventListener("change", onPermissionChange);
+    }
 
     img.onload = () => finish({
       ip,
@@ -3440,7 +3675,7 @@ function testCameraHostInBrowser(ip) {
 
     // Give the user time to answer a native browser permission prompt, which
     // is raised by the request itself rather than by a JS permission API.
-    const timeoutId = setTimeout(() => finish(null), 15000);
+    const timeoutId = setTimeout(() => finish(null), timeoutMs);
     img.src = `http://${ip}/favicon.ico?t=${Date.now()}`;
   });
 }

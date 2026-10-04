@@ -86,29 +86,32 @@ class OmniSightHandler(BaseHTTPRequestHandler):
             return
         super().log_message(format, *args)
 
+    def send_cors_headers(self):
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, HEAD")
+        self.send_header(
+            "Access-Control-Allow-Headers",
+            "Content-Type, Authorization, Access-Control-Request-Private-Network",
+        )
+        self.send_header("Access-Control-Allow-Private-Network", "true")
+
     def send_json(self, data: Any, status: int = 200):
         body = json.dumps(data, indent=2).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self.send_cors_headers()
         self.end_headers()
         self.wfile.write(body)
 
     def do_OPTIONS(self):
         self.send_response(200)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, HEAD")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self.send_cors_headers()
         self.end_headers()
 
     def do_HEAD(self):
         self.send_response(200)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, HEAD")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self.send_cors_headers()
         self.end_headers()
 
     def extract_token(self, query: Optional[Dict[str, list]] = None) -> Optional[str]:
@@ -386,6 +389,7 @@ class OmniSightHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "image/jpeg")
             self.send_header("Content-Length", str(len(frame)))
             self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.send_cors_headers()
             # Lets the dashboard tell "real frames" apart from the offline HUD placeholder.
             self.send_header("X-Camera-Status", live["status"])
             self.send_header("X-Camera-Online", "true" if live["online"] else "false")
@@ -417,6 +421,7 @@ class OmniSightHandler(BaseHTTPRequestHandler):
                 self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
                 self.send_header("Pragma", "no-cache")
                 self.send_header("Expires", "0")
+                self.send_cors_headers()
                 self.end_headers()
                 self.wfile.write(frame)
             else:
@@ -886,6 +891,7 @@ class OmniSightHandler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
             self.send_header("Pragma", "no-cache")
             self.send_header("Expires", "0")
+            self.send_cors_headers()
             self.end_headers()
             self.wfile.write(content)
         except Exception as e:
@@ -898,6 +904,7 @@ class OmniSightHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
         self.send_header("Pragma", "no-cache")
         self.send_header("Connection", "close")
+        self.send_cors_headers()
         self.end_headers()
 
         target_fps = max(10, session.camera_info.get("fps", 25))
