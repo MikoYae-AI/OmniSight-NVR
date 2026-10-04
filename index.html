@@ -2,35 +2,40 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="theme-color" content="#000000">
-  <title>OmniSight-NVR ✦ Universal CCTV & Camera Hub</title>
-  <link rel="stylesheet" href="./static/css/style.css?v=2.2.0">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Cinzel:wght@500;700&display=swap" rel="stylesheet">
+  <meta name="theme-color" content="#0b120e">
+  <meta name="description" content="OmniSight is a local-first surveillance dashboard for bringing IP cameras and DVRs into one clear, private view.">
+  <title>OmniSight NVR — Every angle, in view</title>
+  <link rel="stylesheet" href="./static/css/style.css?v=2.3.0">
+  <link rel="stylesheet" href="./static/css/refined.css?v=2.3.0">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js" defer></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js" defer></script>
 </head>
-<body class="theme-gothic">
+<body class="theme-field">
   <div class="app-container">
     <!-- Navigation / Top Bar -->
     <header class="top-nav">
       <div class="brand-section">
         <div class="brand-badge">
-          <span class="fox-emblem">✦</span>
+          <span class="fox-emblem" aria-hidden="true">
+            <svg class="brand-mark" viewBox="0 0 36 36" aria-hidden="true">
+              <path d="M12 6H7a1 1 0 0 0-1 1v5M24 6h5a1 1 0 0 1 1 1v5M30 24v5a1 1 0 0 1-1 1h-5M12 30H7a1 1 0 0 1-1-1v-5" />
+              <circle cx="18" cy="18" r="5.5" />
+              <circle class="brand-mark-core" cx="18" cy="18" r="1.7" />
+            </svg>
+          </span>
           <div class="brand-text">
             <h1 class="brand-title">OMNISIGHT<span class="brand-sub">NVR</span></h1>
-            <span class="brand-tagline">UNIVERSAL CCTV & SURVEILLANCE MATRIX</span>
+            <span class="brand-tagline">LOCAL-FIRST VIDEO · ALWAYS IN VIEW</span>
           </div>
         </div>
-        <div class="system-health">
-          <span class="status-indicator live-pulse"></span>
-          <span class="status-label" id="matrixStatusLabel">MATRIX ONLINE</span>
-          <span class="mode-badge" id="appModeBadge">CLOUD / GITHUB</span>
+        <div class="system-health" aria-label="System status">
+          <span class="status-indicator live-pulse" aria-hidden="true"></span>
+          <span class="status-label" id="matrixStatusLabel">SYSTEM READY</span>
+          <span class="mode-badge" id="appModeBadge">BROWSER MODE</span>
           <span class="clock-display" id="clockDisplay">00:00:00</span>
         </div>
       </div>
@@ -95,14 +100,47 @@
       </div>
     </header>
 
-    <!-- Sub-header Filters & Status Bar -->
+    <!-- Editorial dashboard hero / status overview -->
+    <section class="dashboard-hero" aria-labelledby="dashboardTitle">
+      <div class="hero-copy">
+        <p class="hero-kicker"><span class="hero-kicker-mark" aria-hidden="true"></span> PRIVATE VIDEO SYSTEM <span class="hero-kicker-divider">/</span> LIVE MATRIX</p>
+        <h2 id="dashboardTitle">Every angle, <em>in view.</em></h2>
+        <p class="hero-description">A quieter command center for the cameras that watch over your space.</p>
+      </div>
+      <aside class="hero-aside" aria-label="Dashboard summary">
+        <div class="hero-mode-row">
+          <span class="hero-live-indicator" aria-hidden="true"></span>
+          <div>
+            <span class="hero-metric-label">CONNECTION MODE</span>
+            <strong class="hero-mode-value" id="heroConnectionLabel">BROWSER MODE</strong>
+          </div>
+        </div>
+        <div class="hero-metrics">
+          <div class="hero-metric">
+            <span class="hero-metric-label">CAMERAS</span>
+            <strong id="heroCameraCount">00</strong>
+          </div>
+          <span class="hero-metric-divider" aria-hidden="true"></span>
+          <div class="hero-metric">
+            <span class="hero-metric-label">LAYOUT</span>
+            <strong id="heroLayoutLabel">2×2</strong>
+          </div>
+        </div>
+        <p class="hero-aside-caption">LOCAL BY DESIGN <span>·</span> PRIVATE BY DEFAULT</p>
+      </aside>
+    </section>
+
+    <!-- Camera group filters and connection state -->
     <div class="filter-bar">
-      <div class="group-pills" id="groupPills">
-        <button class="pill active" data-group="All">All Cameras (<span id="totalCamCount">0</span>)</button>
+      <div class="filter-shell">
+        <span class="filter-caption">CAMERA GROUP</span>
+        <div class="group-pills" id="groupPills">
+          <button class="pill active" data-group="All">All Cameras (<span id="totalCamCount">0</span>)</button>
+        </div>
       </div>
       <div class="quick-stats">
-        <span class="stat-item"><span class="stat-dot green"></span> Hikvision / Dahua / Chinese XM Unified</span>
-        <span class="stat-item" id="storageInfo">Active Mode: <strong id="hubModeText">GitHub Pages Standalone</strong></span>
+        <span class="stat-item"><span class="stat-dot green" aria-hidden="true"></span> Local-first monitoring</span>
+        <span class="stat-item" id="storageInfo">ACTIVE MODE <strong id="hubModeText">Browser-only</strong></span>
       </div>
     </div>
 
@@ -852,8 +890,11 @@
       </div>
       <div class="modal-body">
         <p class="section-desc">
-          Detects cameras on your network. In <strong>Cloud Mode</strong>, scans local LAN subnets directly from your browser. 
-          In <strong>Local Hub Mode</strong>, also performs ONVIF UDP multicast probes (port 3702).
+          Detects cameras on your network. In <strong>Standalone Browser Mode</strong>, scans the selected LAN subnet directly from your browser.
+          In <strong>Local Hub Mode</strong>, discovery runs on the hub and can also perform ONVIF UDP multicast probes (port 3702).
+        </p>
+        <p class="section-desc" id="browserNetworkPermissionInfo" role="status" style="font-size: 11px; color: var(--text-muted);">
+          Browser scans send read-only HTTP probes only after you click <strong>Run Network Scan</strong>. Permission prompts vary by browser and version; allow local-network access if prompted. If direct probes are blocked or unsupported, connect a Local Hub—its scan runs on the server.
         </p>
         
         <div class="scanner-actions">
@@ -1165,6 +1206,27 @@
         <button class="btn-close" id="btnCloseMobileMenuModal">&times;</button>
       </div>
       <div class="modal-body mobile-menu-list">
+        <button class="mobile-menu-item" id="sheetHubConnector">
+          <span class="icon">🔗</span>
+          <div class="item-text">
+            <strong>Connect a Hub</strong>
+            <span>Link this browser to your local NVR or secure tunnel</span>
+          </div>
+        </button>
+        <button class="mobile-menu-item" id="sheetCloudRelay">
+          <span class="icon">📶</span>
+          <div class="item-text">
+            <strong>Remote Access</strong>
+            <span>Open the secure mobile relay and QR code</span>
+          </div>
+        </button>
+        <button class="mobile-menu-item" id="sheetBrowserNode">
+          <span class="icon">📱</span>
+          <div class="item-text">
+            <strong>Use This Device as a Camera</strong>
+            <span>Start a browser camera node</span>
+          </div>
+        </button>
         <button class="mobile-menu-item" id="sheetAddCamera">
           <span class="icon">➕</span>
           <div class="item-text">
@@ -1218,6 +1280,6 @@
     </div>
   </div>
 
-  <script src="./static/js/app.js?v=2.2.0"></script>
+  <script src="./static/js/app.js?v=2.3.0"></script>
 </body>
 </html>

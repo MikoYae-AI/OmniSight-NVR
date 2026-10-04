@@ -175,6 +175,32 @@ Two rules worth knowing:
    for a permanent connector use a named Cloudflare tunnel or Tailscale (both covered in
    *Remote Access* below).
 
+#### Browser Local Network permission
+
+A standalone dashboard also checks the same-origin service when applicable, an explicitly
+saved Hub URL, and the conventional `localhost` loopback address on startup to restore an
+existing Hub connection. In browsers that gate those requests, their native permission prompt may appear
+while the connection is being restored; denied or unsupported requests fall back to browser
+mode, and a saved Hub can be retried from **Connect a Hub**. These are targeted connection
+checks, not a subnet scan. In standalone mode, displaying a saved camera feed may also
+request that camera's configured local address; any permission decision is handled by the
+browser. With a Local Hub, camera access and stream ingestion happen on the server.
+
+A LAN scan from the standalone dashboard sends read-only HTTP probes only after **Run
+Network Scan** is clicked. The app feature-detects the current
+`local-network` permission name and the older `local-network-access` alias without
+assuming a specific browser. Where supported, the browser raises its own Local Network
+prompt on the first request; prompt wording and settings differ across browsers and
+versions. JavaScript can inspect this permission but has no general `request()` method for
+it; for the LAN scan, the click-started network request is what triggers the browser prompt.
+
+Some browsers do not expose the same permission API or may block direct browser-to-camera
+HTTP requests differently. If a direct scan or feed does not work, connect to a Local Hub:
+discovery and stream ingestion then run on the server, avoiding browser-specific LAN/CORS
+behavior. If access was blocked, allow local-network access for the site in browser settings
+and retry. Public hosted pages need a secure context (HTTPS) in browsers that enforce this
+permission.
+
 #### Signing in through the connector (remembered logins)
 
 The connector also takes an optional **username + password**. On Connect, the website

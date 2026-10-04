@@ -1908,7 +1908,9 @@ function disconnectHub() {
   location.reload();
 }
 
-// Detect Local Python Backend vs Standalone GitHub Pages Mode
+// Detect the same-origin service or restore a configured/local Hub. These
+// targeted status checks are separate from the click-to-scan LAN probes; rely
+// on the browser's native permissions behavior and gracefully skip failures.
 async function detectBackend() {
   const candidates = [
     "", // relative (localhost or direct tunnel origin)
@@ -1926,9 +1928,11 @@ async function detectBackend() {
         hubBaseUrl = candidate;
         localApiAvailable = true;
         const isTunnel = candidate.includes("trycloudflare.com");
+        const heroConnectionLabel = document.getElementById("heroConnectionLabel");
+        if (heroConnectionLabel) heroConnectionLabel.textContent = isTunnel ? "SECURE TUNNEL" : "LOCAL HUB";
         appModeBadge.textContent = isTunnel ? "SECURE TUNNEL ONLINE" : "LOCAL HUB ONLINE";
-        appModeBadge.style.background = "rgba(16, 185, 129, 0.15)";
-        appModeBadge.style.borderColor = "var(--accent-green)";
+        appModeBadge.style.background = "rgba(179, 217, 118, 0.12)";
+        appModeBadge.style.borderColor = "rgba(179, 217, 118, 0.30)";
         appModeBadge.style.color = "var(--accent-green)";
         hubModeText.textContent = isTunnel ? "Connected via Cloudflare Secure Tunnel" : "Connected to Python NVR Hub (:8080)";
         backendBridgeStatus.textContent = isTunnel ? `Cloudflare Tunnel Active (${candidate})` : "Local Server Mode: Full Hardware Multiplexing Active";
@@ -1970,18 +1974,20 @@ async function detectBackend() {
     }
   }
 
-  // Fallback to GitHub Pages Standalone Client Mode
+  // Fallback to standalone browser mode when no hub is reachable.
   localApiAvailable = false;
-  appModeBadge.textContent = "GITHUB PAGES CLOUD";
-  hubModeText.textContent = "GitHub Pages Mode (Local Storage + In-Browser Scanner)";
-  backendBridgeStatus.textContent = "Cloud Deployment: https://mikoyae-ai.github.io/OmniSight-NVR/";
   const savedHub = getSavedHubUrl();
+  const heroConnectionLabel = document.getElementById("heroConnectionLabel");
+  if (heroConnectionLabel) heroConnectionLabel.textContent = savedHub ? "HUB OFFLINE" : "BROWSER MODE";
+  appModeBadge.textContent = savedHub ? "HUB UNREACHABLE" : "BROWSER MODE";
+  hubModeText.textContent = savedHub ? "Saved hub unavailable" : "Browser-only · Local storage";
+  backendBridgeStatus.textContent = "Standalone browser mode · connect a hub for server-side ingest";
   if (savedHub) {
     backendBridgeStatus.textContent = `Hub Connector: ${savedHub} configured but unreachable — check the hub / tunnel is running`;
-    backendBridgeStatus.style.color = "#ff9f0a";
+    backendBridgeStatus.style.color = "#e2a965";
   }
   refreshHubConnectorUI();
-  ffmpegStatus.textContent = "ActiveX / IE Mode: Direct HTML5 Snapshot Polling Ready";
+  ffmpegStatus.textContent = "Browser mode: direct snapshot feeds available";
   
   // In Cloud mode, check passcode lock if configured
   const savedPasscode = localStorage.getItem("omnisight_passcode");
@@ -2085,6 +2091,8 @@ function renderGroupPills(groups) {
     groupPills.appendChild(btn);
   });
   totalCamCount.textContent = cameras.length;
+  const heroCameraCount = document.getElementById("heroCameraCount");
+  if (heroCameraCount) heroCameraCount.textContent = String(cameras.length).padStart(2, "0");
 }
 
 function setFilter(group) {
@@ -2099,6 +2107,8 @@ function setFilter(group) {
 function setLayout(layout, save = true) {
   currentLayout = layout;
   cameraGrid.className = `camera-grid grid-${layout}`;
+  const heroLayoutLabel = document.getElementById("heroLayoutLabel");
+  if (heroLayoutLabel) heroLayoutLabel.textContent = layout.replace("x", "×");
   document.querySelectorAll(".btn-layout").forEach(btn => {
     btn.classList.toggle("active", btn.dataset.layout === layout);
   });
@@ -2118,6 +2128,10 @@ function setLayout(layout, save = true) {
 
 // Render Camera Cards
 function renderGrid() {
+  const heroCameraCount = document.getElementById("heroCameraCount");
+  if (heroCameraCount) heroCameraCount.textContent = String(cameras.length).padStart(2, "0");
+  if (totalCamCount) totalCamCount.textContent = cameras.length;
+
   // Clear any active snapshot polling intervals
   Object.keys(pollingIntervals).forEach(k => {
     clearInterval(pollingIntervals[k]);
@@ -2130,7 +2144,25 @@ function renderGrid() {
     : cameras.filter(c => c.group === activeFilter);
 
   if (filtered.length === 0) {
-    cameraGrid.innerHTML = `<div class="empty-state" style="grid-column: 1/-1;">No cameras registered in this zone. Click "+ ADD CAMERA" or "IMPORT DVR" above.</div>`;
+    if (cameras.length === 0) {
+      cameraGrid.innerHTML = `
+        <section class="empty-matrix" aria-labelledby="emptyMatrixTitle">
+          <div class="empty-matrix-art" aria-hidden="true">⌖</div>
+          <p class="empty-matrix-kicker">01 / YOUR CAMERA MATRIX</p>
+          <h3 id="emptyMatrixTitle">Bring your first camera into view.</h3>
+          <p>Add a camera by its local address, or discover devices on your network. Your video stays under your control.</p>
+          <div class="empty-matrix-actions">
+            <button type="button" class="btn-action btn-primary" id="emptyAddCamera">＋ Add a camera</button>
+            <button type="button" class="btn-action btn-secondary" id="emptyDiscoverCameras">⌕ Discover devices</button>
+          </div>
+          <p class="empty-matrix-note">LOCAL-FIRST · ONVIF · RTSP · LEGACY CCTV</p>
+        </section>`;
+      document.getElementById("emptyAddCamera")?.addEventListener("click", openAddCameraModal);
+      document.getElementById("emptyDiscoverCameras")?.addEventListener("click", () => discoveryModal.classList.remove("hidden"));
+    } else {
+      cameraGrid.innerHTML = `<div class="empty-state no-group-cameras" style="grid-column: 1/-1;">No cameras in “${escapeHtml(activeFilter)}”. <button type="button" class="btn-text" id="btnClearCameraFilter">Show all cameras</button></div>`;
+      document.getElementById("btnClearCameraFilter")?.addEventListener("click", () => setFilter("All"));
+    }
     return;
   }
 
@@ -3135,51 +3167,120 @@ async function deleteCamera(camId) {
 }
 
 // IN-BROWSER & BACKEND NETWORK SCANNER
+// The Permissions API can report Local Network Access state, but it has no
+// request() method. On supported browsers the native prompt is triggered by
+// the first real local-network request, so only dispatch these probes after
+// the user explicitly clicks Run Network Scan.
+async function queryBrowserLocalNetworkPermission() {
+  if (!navigator.permissions || typeof navigator.permissions.query !== "function") return null;
+
+  // Prefer the current cross-browser descriptor. Older Chromium builds expose
+  // the legacy alias; browsers without either descriptor fall back gracefully.
+  for (const name of ["local-network", "local-network-access"]) {
+    try {
+      return await navigator.permissions.query({ name });
+    } catch (e) {
+      // Permission descriptor not implemented by this browser/version.
+    }
+  }
+  return null;
+}
+
+function isPrivateIpv4SubnetBase(value) {
+  const octets = String(value).trim().split(".");
+  if (octets.length !== 3 || octets.some(part => !/^\d{1,3}$/.test(part))) return false;
+  const [first, second, third] = octets.map(Number);
+  if ([first, second, third].some(part => part < 0 || part > 255)) return false;
+  return first === 10 ||
+    (first === 172 && second >= 16 && second <= 31) ||
+    (first === 192 && second === 168) ||
+    (first === 169 && second === 254);
+}
+
+function showBrowserNetworkPermissionDenied(scanStatusMsg, tbody) {
+  scanStatusMsg.textContent = "Browser blocked local-network access.";
+  tbody.innerHTML = `<tr><td colspan="6" class="empty-state">Local Network permission is blocked for this site. Allow it in your browser's site settings (usually the address-bar permissions menu), then run the scan again. You can also connect to a Local Hub, which scans from the server instead.</td></tr>`;
+  showNotification("Allow Local Network access for this site in browser settings, then retry the scan.", "warning");
+}
+
 async function startDiscoveryScan() {
   const scanStatusMsg = document.getElementById("scanStatusMsg");
   const tbody = document.getElementById("discoveryTableBody");
-  const subnetBase = document.getElementById("scanSubnetInput").value || "192.168.1";
+  const scanButton = document.getElementById("btnStartScan");
+  const subnetInput = document.getElementById("scanSubnetInput");
+  const subnetBase = (subnetInput?.value || "192.168.1").trim();
 
-  scanStatusMsg.textContent = "Scanning local subnet for cameras...";
-  tbody.innerHTML = `<tr><td colspan="6" class="empty-state">Probing subnet ${subnetBase}.1 to ${subnetBase}.40... Please wait.</td></tr>`;
+  if (!scanStatusMsg || !tbody || !scanButton || scanButton.disabled) return;
+  scanButton.disabled = true;
 
-  if (localApiAvailable) {
-    try {
-      const res = await authFetch("/api/discovery/scan");
-      if (res.ok) {
-        const data = await res.json();
-        renderDiscoveredDevices(data.devices, "ONVIF UDP / Port Scan");
-        scanStatusMsg.textContent = `Scan complete. Found ${data.devices.length} device(s).`;
-        return;
-      }
-    } catch (e) {}
-  }
+  try {
+    scanStatusMsg.textContent = "Scanning local subnet for cameras...";
+    tbody.innerHTML = `<tr><td colspan="6" class="empty-state">Preparing network scan…</td></tr>`;
 
-  const detected = [];
-  let completed = 0;
-  const totalToScan = 35;
+    if (localApiAvailable) {
+      try {
+        const res = await authFetch("/api/discovery/scan");
+        if (res.ok) {
+          const data = await res.json();
+          const devices = Array.isArray(data.devices) ? data.devices : [];
+          renderDiscoveredDevices(devices, "ONVIF UDP / Port Scan");
+          scanStatusMsg.textContent = `Scan complete. Found ${devices.length} device(s).`;
+          return;
+        }
+      } catch (e) {}
+    }
 
-  for (let i = 1; i <= totalToScan; i++) {
-    const ip = `${subnetBase}.${i}`;
-    testCameraHostInBrowser(ip).then(dev => {
-      completed++;
-      if (dev) {
-        detected.push(dev);
-        renderDiscoveredDevices(detected, "Browser LAN Probe");
-      }
-      if (completed >= totalToScan) {
-        detected.push({
-          ip: "127.0.0.1",
-          type: "Virtual Simulator",
-          vendor_preset: "simulated",
-          vendor_name: "OmniSight Virtual Generator",
-          open_ports: [8000],
-          confidence: "High"
-        });
-        renderDiscoveredDevices(detected, "Browser LAN Probe");
-        scanStatusMsg.textContent = `Browser scan complete. Found ${detected.length} device(s).`;
-      }
-    });
+    // Browser-only discovery is limited to private IPv4 ranges. This prevents
+    // the subnet field from turning the feature into arbitrary public probing.
+    if (!isPrivateIpv4SubnetBase(subnetBase)) {
+      scanStatusMsg.textContent = "Enter a private IPv4 subnet, such as 192.168.1.";
+      tbody.innerHTML = `<tr><td colspan="6" class="empty-state">Use a private subnet base in 10.x.x, 172.16–31.x, 192.168.x, or 169.254.x address space.</td></tr>`;
+      return;
+    }
+
+    const permission = await queryBrowserLocalNetworkPermission();
+    if (permission?.state === "denied") {
+      showBrowserNetworkPermissionDenied(scanStatusMsg, tbody);
+      return;
+    }
+
+    if (permission?.state === "prompt") {
+      scanStatusMsg.textContent = "Your browser may ask for Local Network access; allow it while the scan runs.";
+    } else if (permission?.state === "granted") {
+      scanStatusMsg.textContent = "Local Network access granted. Scanning subnet…";
+    } else {
+      scanStatusMsg.textContent = window.isSecureContext === false
+        ? "Scanning subnet… this browser may require HTTPS or localhost for its Local Network prompt."
+        : "Scanning subnet… your browser may ask for Local Network access.";
+    }
+
+    tbody.innerHTML = `<tr><td colspan="6" class="empty-state">Probing ${subnetBase}.1–${subnetBase}.35… If your browser asks to access devices on your local network, choose Allow to continue.</td></tr>`;
+
+    const detected = [];
+    const totalToScan = 35;
+    const probes = [];
+    for (let i = 1; i <= totalToScan; i++) {
+      const ip = `${subnetBase}.${i}`;
+      probes.push(testCameraHostInBrowser(ip).then(dev => {
+        if (dev) {
+          detected.push(dev);
+          renderDiscoveredDevices(detected, "Browser LAN Probe");
+        }
+      }));
+    }
+
+    await Promise.all(probes);
+    if (permission?.state === "denied") {
+      showBrowserNetworkPermissionDenied(scanStatusMsg, tbody);
+      return;
+    }
+
+    renderDiscoveredDevices(detected, "Browser LAN Probe");
+    scanStatusMsg.textContent = detected.length
+      ? `Browser scan complete. Found ${detected.length} device(s).`
+      : "No devices responded. Check the subnet and browser permission, or connect a Local Hub if direct LAN requests are blocked.";
+  } finally {
+    scanButton.disabled = false;
   }
 }
 
@@ -3187,30 +3288,27 @@ function testCameraHostInBrowser(ip) {
   return new Promise((resolve) => {
     const img = new Image();
     let resolved = false;
-
-    img.onload = () => {
-      if (!resolved) {
-        resolved = true;
-        resolve({
-          ip,
-          type: "HTTP CCTV Device",
-          vendor_preset: "generic_onvif",
-          vendor_name: "Detected Camera / DVR Web UI",
-          open_ports: [80],
-          confidence: "High"
-        });
-      }
+    const finish = (device) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timeoutId);
+      resolve(device);
     };
 
-    img.onerror = () => {};
+    img.onload = () => finish({
+      ip,
+      type: "HTTP CCTV Device",
+      vendor_preset: "generic_onvif",
+      vendor_name: "Detected Camera / DVR Web UI",
+      open_ports: [80],
+      confidence: "High"
+    });
+    img.onerror = () => finish(null);
 
+    // Give the user time to answer a native browser permission prompt, which
+    // is raised by the request itself rather than by a JS permission API.
+    const timeoutId = setTimeout(() => finish(null), 15000);
     img.src = `http://${ip}/favicon.ico?t=${Date.now()}`;
-    setTimeout(() => {
-      if (!resolved) {
-        resolved = true;
-        resolve(null);
-      }
-    }, 1200);
   });
 }
 
@@ -4355,6 +4453,21 @@ function attachEventListeners() {
   // Mobile Quick Menu Drawer Actions
   document.getElementById("btnCloseMobileMenuModal")?.addEventListener("click", () => {
     mobileMenuModal?.classList.add("hidden");
+  });
+
+  document.getElementById("sheetHubConnector")?.addEventListener("click", () => {
+    mobileMenuModal?.classList.add("hidden");
+    btnHubConnector?.click();
+  });
+
+  document.getElementById("sheetCloudRelay")?.addEventListener("click", () => {
+    mobileMenuModal?.classList.add("hidden");
+    btnCloudRelay?.click();
+  });
+
+  document.getElementById("sheetBrowserNode")?.addEventListener("click", () => {
+    mobileMenuModal?.classList.add("hidden");
+    btnBrowserNode?.click();
   });
 
   document.getElementById("sheetAddCamera")?.addEventListener("click", () => {
