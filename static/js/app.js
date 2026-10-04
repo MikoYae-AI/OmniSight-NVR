@@ -68,7 +68,7 @@ const DEFAULT_CLIENT_CAMERAS = [
     snapshot_url: "http://192.168.1.13/ISAPI/Streaming/channels/101/picture",
     channel: 1,
     is_simulated: true,
-    legacy_polling: true,
+    legacy_polling: false,
     status: "online",
     fps: 25,
     resolution: "1920x1080",
@@ -2805,13 +2805,25 @@ function drawTacticalFallback(container, cam, message) {
         This page is HTTPS, so the browser refuses plain-http requests to LAN devices —
         and most browsers offer no per-site switch for it.
       </p>
-      <a href="${hub}" target="_blank" rel="noopener" class="btn-action btn-primary" style="font-size: 11px; text-decoration: none; padding: 7px 16px;">
-        Open the hub instead (${hub})
-      </a>
-      <button type="button" class="btn-action btn-secondary" data-open-mixed-content-help style="font-size: 10px; padding: 6px 14px; margin-top: 8px;">
+      <div style="display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-bottom: 8px;">
+        <button type="button" class="btn-action btn-primary" data-open-hub-connector style="font-size: 11px; padding: 7px 16px;">
+          🔗 Connect Cloudflare Tunnel / Hub
+        </button>
+        <a href="${hub}" target="_blank" rel="noopener" class="btn-action btn-secondary" style="font-size: 11px; text-decoration: none; padding: 7px 16px;">
+          Open Local Hub (${hub})
+        </a>
+      </div>
+      <button type="button" class="btn-action btn-ghost" data-open-mixed-content-help style="font-size: 10px; padding: 6px 14px;">
         Why? Fix it in ${mixedContentBrowserSteps().engine}
       </button>
     `;
+    fb.querySelector("[data-open-hub-connector]")?.addEventListener("click", () => {
+      const modal = document.getElementById("hubConnectorModal");
+      if (modal) {
+        modal.classList.remove("hidden");
+        document.getElementById("hubConnectorUrl")?.focus();
+      }
+    });
     fb.querySelector("[data-open-mixed-content-help]")?.addEventListener("click", openMixedContentHelp);
     container.appendChild(fb);
   }
