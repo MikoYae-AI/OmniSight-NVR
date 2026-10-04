@@ -395,6 +395,7 @@
             ⚠️ From an HTTPS page (e.g. GitHub Pages), browsers only allow <strong>https</strong> hub URLs —
             use the hub's Cloudflare tunnel URL (📶 4G Cloud panel), or simply open the hub URL directly
             in a new tab: the same dashboard loads, served by the hub itself.
+            <a href="#" data-open-mixed-content-help style="color: var(--apple-blue); text-decoration: underline;">Why? &amp; browser-by-browser options</a>
           </p>
         </div>
 
@@ -406,6 +407,68 @@
           <button type="button" class="btn-action btn-primary" id="btnConnectHub" style="flex: 1; justify-content: center;">
             <span>🔌 Connect &amp; Reload</span>
           </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Mixed-content / insecure-content help (browser-aware) -->
+  <div class="modal-overlay hidden" id="mixedContentModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 20px;">🔒</span>
+          <h3 style="margin: 0;">Why your camera is blank</h3>
+        </div>
+        <button class="btn-close" id="btnCloseMixedContentModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="section-desc">
+          This dashboard is served over <strong>HTTPS</strong>. Cameras, DVRs and the OmniSight hub answer on
+          plain <strong>http://</strong> — so the browser refuses to let an encrypted page pull frames from an
+          unencrypted device. That rule is called <em>mixed content</em>, and it is enforced by every modern browser.
+        </p>
+
+        <div style="background: rgba(52, 199, 89, 0.08); border: 1px solid rgba(52, 199, 89, 0.28); border-radius: 12px; padding: 16px; margin-bottom: 16px;">
+          <div style="font-size: 12px; font-weight: 700; color: var(--accent-green); margin-bottom: 8px; letter-spacing: 0.04em;">
+            ✓ FIX 1 — OPEN THE HUB DIRECTLY (WORKS IN EVERY BROWSER, NO SETTINGS)
+          </div>
+          <p style="font-size: 12px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 12px;">
+            The hub serves this exact same dashboard over http, so the page and the cameras share one origin —
+            nothing is mixed and no browser setting is needed. Bookmarked, it is the most reliable way to run OmniSight.
+          </p>
+          <a href="http://localhost:8080" target="_blank" rel="noopener" data-mc-hub-link class="btn-action btn-primary" style="font-size: 12px; text-decoration: none; padding: 8px 16px; justify-content: center;">
+            Open http://localhost:8080
+          </a>
+        </div>
+
+        <div style="background: rgba(10, 132, 255, 0.08); border: 1px solid rgba(10, 132, 255, 0.28); border-radius: 12px; padding: 16px; margin-bottom: 16px;">
+          <div style="font-size: 12px; font-weight: 700; color: var(--apple-blue); margin-bottom: 8px; letter-spacing: 0.04em;">
+            ✓ FIX 2 — GIVE THE HUB AN HTTPS ADDRESS
+          </div>
+          <p style="font-size: 12px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 6px;">
+            Then you can keep using this hosted page and paste the https URL into <strong>🔗 Hub</strong>:
+          </p>
+          <ul style="font-size: 12px; color: var(--text-secondary); line-height: 1.6; padding-left: 20px; margin: 0;">
+            <li><strong>Cloudflare quick tunnel</strong> — open the hub's <strong>📶 4G Cloud</strong> panel and copy the <code>https://xxxx.trycloudflare.com</code> URL. Needs <code>cloudflared</code> on the hub machine; free, no account.</li>
+            <li><strong>Tailscale Funnel</strong> — <code>tailscale funnel 8080 on</code> gives a permanent <code>https://host.tailnet.ts.net</code> URL.</li>
+            <li><strong>Reverse proxy</strong> — Caddy, nginx or Traefik with a real certificate in front of <code>:8080</code>. Avoid self-signed certs: Safari rejects them outright.</li>
+          </ul>
+        </div>
+
+        <div style="background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; padding: 16px;">
+          <div style="font-size: 12px; font-weight: 700; color: var(--apple-amber); margin-bottom: 8px; letter-spacing: 0.04em;">
+            ⚠ FIX 3 — FORCE THIS BROWSER TO ALLOW IT
+          </div>
+          <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 10px; font-family: monospace;" id="mcDetectedBrowser">
+            detecting browser…
+          </p>
+          <p style="font-size: 12px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 10px;" id="mcBrowserIntro"></p>
+          <ol id="mcBrowserSteps" style="font-size: 12px; color: var(--text-secondary); line-height: 1.65; padding-left: 20px; margin: 0 0 10px 0;"></ol>
+          <p id="mcBrowserCaveat" style="font-size: 11px; color: var(--text-muted); line-height: 1.5; border-left: 2px solid rgba(255, 159, 10, 0.5); padding-left: 10px; margin: 0;"></p>
+          <p style="font-size: 11px; color: var(--text-muted); line-height: 1.5; margin: 12px 0 0 0;">
+            Hub origin OmniSight would use: <code id="mcHubOrigin" style="color: var(--text-secondary);"></code>
+          </p>
         </div>
       </div>
     </div>

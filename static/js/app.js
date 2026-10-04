@@ -2459,6 +2459,136 @@ function startCanvasSimulation(canvas, cam) {
   pollingIntervals[`canvas-${cam.id}`] = animTimer;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Mixed-content guidance. An HTTPS page (GitHub Pages) cannot pull frames from
+// a plain-http camera or hub. The escape hatches differ per browser, and the
+// old "padlock > Site settings > Insecure content" advice is Chrome-only — it
+// does not exist in Safari at all, and in Firefox/Zen it is an about:config
+// pref. Detect the engine and show guidance that actually applies.
+// ─────────────────────────────────────────────────────────────────────────────
+function detectBrowserEngine() {
+  const ua = navigator.userAgent || "";
+  const isAppleWebKit = /AppleWebKit/.test(ua);
+  // Chrome, Edge, Brave, Vivaldi, Opera, Arc, Zen-mobile… all carry "Chrome".
+  // Safari carries "Version/" and never "Chrome"; Zen Desktop is Gecko/Firefox.
+  // FxiOS (Firefox for iOS) is deliberately excluded: Apple forces WebKit there,
+  // so about:config does not exist and it needs the Safari guidance instead.
+  if (/Firefox\/|Zen\/|Gecko\/20100101/.test(ua) && !/Chrome\//.test(ua) && !/FxiOS\//.test(ua)) return "gecko";
+  if (/Chrome\/|Chromium\/|Edg\/|OPR\/|Vivaldi\/|Brave/.test(ua)) return "chromium";
+  if (isAppleWebKit) return "webkit";
+  return "other";
+}
+
+// The hub origin to deep-link to: a saved connector URL beats the loopback
+// default, because the hub is often on another machine (192.168.x.x, Tailscale).
+function resolveHubOrigin() {
+  const saved = getSavedHubUrl();
+  if (saved) return saved;
+  if (hubBaseUrl) return hubBaseUrl;
+  return "http://localhost:8080";
+}
+
+// Per-engine steps for users who insist on staying on the HTTPS page.
+function mixedContentBrowserSteps() {
+  const engine = detectBrowserEngine();
+  if (engine === "chromium") {
+    return {
+      engine: "Chrome / Chromium",
+      hasToggle: true,
+      intro:
+        "The “Insecure content” permission exists, but it is a <em>per-site</em> permission and many Chromium builds and forks hide it from the padlock popover. Reach it directly instead:",
+      steps: [
+        "Paste <code>chrome://settings/content/insecureContent</code> into the address bar (use <code>edge://</code>, <code>brave://</code>, <code>vivaldi://</code>… in forks) and add this site under “Allowed to show insecure content”.",
+        "Or open <code>chrome://settings/content/siteDetails?site=https://mikoyae-ai.github.io</code> and look for <strong>Insecure content → Allow</strong>. If it is not listed, this build hides the permission.",
+        "Last resort: launch the browser with <code>--allow-running-insecure-content</code>, or enable the flag “Insecure origins treated as secure” (<code>chrome://flags/#unsafely-treat-insecure-origin-as-secure</code>) and list your hub origin, e.g. <code>http://192.168.1.50:8080</code>, then relaunch.",
+        "Reload this page afterwards — the setting is only read on load."
+      ],
+      caveat:
+        "Chrome 84+ also <em>auto-upgrades</em> http images to https and blocks them if the upgrade fails. A camera that only serves http will stay blank until the per-site allow is in place, and some forks ignore that setting for IP-address origins."
+    };
+  }
+  if (engine === "gecko") {
+    return {
+      engine: "Firefox / Zen Browser",
+      hasToggle: false,
+      intro:
+        "Firefox-based browsers have <strong>no</strong> “Insecure content” site permission, so it will never appear in site settings. Use <code>about:config</code> instead:",
+      steps: [
+        "Open <code>about:config</code>, accept the warning.",
+        "Set <code>security.mixed_content.upgrade_display_content</code> to <code>false</code>. This is the one that matters here: since Firefox 127 (and Zen with it) http images/video/audio are silently rewritten to https and <em>blocked</em> when the camera has no https — so a plain-http snapshot never loads.",
+        "Set <code>security.mixed_content.block_active_content</code> to <code>false</code> if you also need http fetch/XHR/iframe calls (e.g. the Hub Connector talking to <code>http://192.168.x.x:8080</code>).",
+        "Reload the page. Both prefs are global — they weaken every tab, so reset them to <code>true</code> when you are done."
+      ],
+      caveat:
+        "There is no per-site equivalent in Firefox/Zen. The old shield-icon “Disable protection on this page” menu was repurposed for Tracking Protection years ago, so it will not help with mixed content."
+    };
+  }
+  if (engine === "webkit") {
+    return {
+      engine: "Safari",
+      hasToggle: false,
+      intro:
+        "Safari blocks mixed content with <strong>no user-facing setting at all</strong> — there is nothing to allow, which is why you found no “Insecure content” row:",
+      steps: [
+        "macOS: Safari → Settings → Advanced → tick <strong>“Show features for web developers”</strong> (older versions: “Show Develop menu in menu bar”). Then <strong>Develop → Website Settings…</strong>, select this site in the sidebar and look for an <em>“Insecure Content” / “Load insecure content”</em> entry. Only some Safari releases ship it.",
+        "If that entry is missing, Safari gives you no override — opening the hub URL directly in its own tab is the only fix.",
+        "iOS / iPadOS Safari: no override exists at all. Use the hub URL, or an https tunnel URL."
+      ],
+      caveat:
+        "Self-signed certificates do not help in Safari either: it refuses https with an untrusted cert, so a hub on a home-made certificate trades one block for another."
+    };
+  }
+  return {
+    engine: "this browser",
+    hasToggle: false,
+    intro: "This browser offers no reliable per-site override for mixed content:",
+    steps: [
+      "Open the hub URL directly in its own tab — the hub serves this exact dashboard over plain http, so nothing is mixed.",
+      "Or put an https tunnel in front of the hub and paste that https URL into the Hub Connector."
+    ],
+    caveat: ""
+  };
+}
+
+function openMixedContentHelp() {
+  const modal = document.getElementById("mixedContentModal");
+  if (!modal) return;
+  populateMixedContentHelp();
+  modal.classList.remove("hidden");
+}
+
+function populateMixedContentHelp() {
+  const info = mixedContentBrowserSteps();
+  const hub = resolveHubOrigin();
+  const setText = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
+  };
+  const setHtml = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = value;
+  };
+
+  setText("mcDetectedBrowser", `${info.engine} · detected automatically`);
+  setHtml("mcBrowserIntro", info.intro);
+  setHtml(
+    "mcBrowserSteps",
+    info.steps.map((s) => `<li>${s}</li>`).join("")
+  );
+  const caveat = document.getElementById("mcBrowserCaveat");
+  if (caveat) {
+    caveat.innerHTML = info.caveat || "";
+    caveat.style.display = info.caveat ? "" : "none";
+  }
+  setText("mcHubOrigin", hub);
+
+  const links = document.querySelectorAll("[data-mc-hub-link]");
+  links.forEach((a) => {
+    a.href = hub;
+    a.textContent = `Open ${hub}`;
+  });
+}
+
 // Fallback visual message
 function drawTacticalFallback(container, cam, message) {
   let fb = container.querySelector(".fallback-banner");
@@ -2475,20 +2605,23 @@ function drawTacticalFallback(container, cam, message) {
     fb.style.backdropFilter = "blur(14px)";
     fb.style.padding = "20px";
     fb.style.textAlign = "center";
+    const hub = resolveHubOrigin();
     fb.innerHTML = `
       <span style="color: var(--apple-amber); font-weight: 600; font-size: 13px; margin-bottom: 6px;">
         ⚠️ Browser Blocked Direct HTTP (${cam.ip})
       </span>
       <p style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px; line-height: 1.4; max-width: 320px;">
-        Because you are on HTTPS (GitHub Pages), the browser blocks direct requests to local LAN devices.
+        This page is HTTPS, so the browser refuses plain-http requests to LAN devices —
+        and most browsers offer no per-site switch for it.
       </p>
-      <a href="http://localhost:8080" target="_blank" class="btn-action btn-primary" style="font-size: 11px; text-decoration: none; padding: 7px 16px;">
-        Open on Local Hub (http://localhost:8080)
+      <a href="${hub}" target="_blank" rel="noopener" class="btn-action btn-primary" style="font-size: 11px; text-decoration: none; padding: 7px 16px;">
+        Open the hub instead (${hub})
       </a>
-      <span style="font-size: 10px; color: var(--text-tertiary); margin-top: 10px;">
-        Or click the browser padlock icon &gt; Site settings &gt; Set 'Insecure content' to Allow.
-      </span>
+      <button type="button" class="btn-action btn-secondary" data-open-mixed-content-help style="font-size: 10px; padding: 6px 14px; margin-top: 8px;">
+        Why? Fix it in ${mixedContentBrowserSteps().engine}
+      </button>
     `;
+    fb.querySelector("[data-open-mixed-content-help]")?.addEventListener("click", openMixedContentHelp);
     container.appendChild(fb);
   }
 }
@@ -4047,6 +4180,26 @@ function attachEventListeners() {
       hubConnectorModal.classList.add("hidden");
     });
   }
+
+  // Mixed-content help modal (opened from a blocked camera tile or the connector)
+  const mixedContentModal = document.getElementById("mixedContentModal");
+  document.getElementById("btnCloseMixedContentModal")?.addEventListener("click", () => {
+    mixedContentModal?.classList.add("hidden");
+  });
+  mixedContentModal?.addEventListener("click", (e) => {
+    if (e.target === mixedContentModal) mixedContentModal.classList.add("hidden");
+  });
+  document.querySelectorAll("[data-open-mixed-content-help]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      openMixedContentHelp();
+    });
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && mixedContentModal && !mixedContentModal.classList.contains("hidden")) {
+      mixedContentModal.classList.add("hidden");
+    }
+  });
   if (btnConnectHub) {
     btnConnectHub.addEventListener("click", connectToHub);
   }
