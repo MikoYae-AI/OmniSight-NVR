@@ -177,22 +177,23 @@ Two rules worth knowing:
 
 #### Browser Local Network permission
 
-A standalone dashboard also checks the same-origin service when applicable, an explicitly
-saved Hub URL, and the conventional `localhost` loopback address on startup to restore an
-existing Hub connection. In browsers that gate those requests, their native permission prompt may appear
-while the connection is being restored; denied or unsupported requests fall back to browser
-mode, and a saved Hub can be retried from **Connect a Hub**. These are targeted connection
-checks, not a subnet scan. In standalone mode, displaying a saved camera feed may also
-request that camera's configured local address; any permission decision is handled by the
-browser. With a Local Hub, camera access and stream ingestion happen on the server.
+On startup, the dashboard checks its same-origin `/api/status` when applicable, an explicitly
+saved Hub URL, or `http://localhost:8080` when already running on a local origin or after
+Local Network permission has been granted. Public HTTPS deployments do not fire unsolicited
+loopback or plain-HTTP LAN camera requests on page load, avoiding unexpected or flickering
+native permission prompts before you interact with the app. When connected to the Python NVR
+hub, the server also returns `Access-Control-Allow-Private-Network: true` on preflight and
+API responses for Private/Local Network Access compatibility.
 
 A LAN scan from the standalone dashboard sends read-only HTTP probes only after **Run
 Network Scan** is clicked. The app feature-detects the current
 `local-network` permission name and the older `local-network-access` alias without
-assuming a specific browser. Where supported, the browser raises its own Local Network
-prompt on the first request; prompt wording and settings differ across browsers and
-versions. JavaScript can inspect this permission but has no general `request()` method for
-it; for the LAN scan, the click-started network request is what triggers the browser prompt.
+assuming a specific browser. When permission is not yet granted, the scanner dispatches a
+**single initial probe** (`<subnet>.1`) first and waits for it to settle before scanning the
+remaining hosts in small batches—so the browser raises one steady Local Network prompt
+rather than 35 competing requests at once. If the prompt is still awaiting a response or was
+dismissed (`prompt`), or if access is denied (`denied`), the scanner pauses or stops
+immediately instead of re-triggering the prompt on every address.
 
 Some browsers do not expose the same permission API or may block direct browser-to-camera
 HTTP requests differently. If a direct scan or feed does not work, connect to a Local Hub:
