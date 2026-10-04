@@ -915,8 +915,8 @@ class OmniSightHandler(BaseHTTPRequestHandler):
         self.send_cors_headers()
         self.end_headers()
 
-        cam_fps = int(session.camera_info.get("fps", 15) or 15)
-        target_fps = min(15, max(8, cam_fps))
+        cam_fps = int(session.camera_info.get("fps", 20) or 20)
+        target_fps = min(30, max(5, cam_fps))
         frame_interval = 1.0 / target_fps
         last_frame_bytes = None
 

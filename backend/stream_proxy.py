@@ -696,7 +696,7 @@ class CameraStreamSession:
         while self._running:
             transport = transports[current_transport_idx % len(transports)]
             self.connection_status = "connecting"
-            target_fps = min(15, max(8, int(self.camera_info.get("fps", 15) or 15)))
+            target_fps = min(30, max(5, int(self.camera_info.get("fps", 20) or 20)))
             fps = str(target_fps)
 
             # Build low-latency ingestion pipeline

@@ -20,7 +20,7 @@
       "is_simulated": false,
       "legacy_polling": false,
       "status": "online",
-      "fps": 15,
+      "fps": 20,
       "resolution": "1280x720",
       "ptz": true,
       "notes": "Hikvision 2MP Cube IP Camera (DS-2CD2420F-IW, R6 Platform)."
