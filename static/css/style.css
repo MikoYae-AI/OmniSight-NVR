@@ -425,8 +425,30 @@ body {
   width: 7px;
   height: 7px;
   border-radius: 50%;
+  background: var(--apple-amber);
+  box-shadow: 0 0 6px var(--apple-amber);
+}
+
+/* Real camera state, driven by /api/cameras live_status telemetry */
+.cam-status-dot.online {
   background: var(--apple-green);
   box-shadow: 0 0 6px var(--apple-green);
+}
+
+.cam-status-dot.connecting {
+  background: var(--apple-amber);
+  box-shadow: 0 0 6px var(--apple-amber);
+  animation: camStatusPulse 1.4s ease-in-out infinite;
+}
+
+.cam-status-dot.offline {
+  background: var(--apple-red);
+  box-shadow: 0 0 6px var(--apple-red);
+}
+
+@keyframes camStatusPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
 }
 
 .cam-name {

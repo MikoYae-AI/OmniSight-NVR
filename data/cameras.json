@@ -110,7 +110,7 @@
       "channel": 1,
       "ip": "192.168.1.13",
       "port": 554,
-      "username": "admin ",
+      "username": "admin",
       "password": "Hik@1234",
       "stream_url": "rtsp://192.168.1.13:554/Streaming/Channels/101",
       "ptz": true,
@@ -119,7 +119,8 @@
       "id": "cam-c67cb16c",
       "status": "online",
       "fps": 25,
-      "resolution": "1920x1080"
+      "resolution": "1920x1080",
+      "snapshot_url": "http://192.168.1.13/ISAPI/Streaming/channels/101/picture"
     }
   ],
   "groups": [

@@ -114,6 +114,31 @@ SESSION_TTL_SECONDS = 86400  # 24 hours
 class ConfigManager:
     """Thread-safe configuration & security manager."""
 
+    #: Camera fields that must never carry stray leading/trailing whitespace.
+    #: (A trailing space in a username such as "admin " silently breaks every
+    #: RTSP / ISAPI / CGI authentication attempt against the camera.)
+    TRIMMED_CAMERA_FIELDS = (
+        "id", "name", "vendor", "group", "ip", "username", "stream_url",
+        "sub_stream_url", "snapshot_url", "notes", "location",
+    )
+    INTEGER_CAMERA_FIELDS = ("port", "channel", "talkback_port", "fps")
+
+    @classmethod
+    def normalize_camera(cls, cam_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Trims user-entered camera fields and coerces numeric strings to ints.
+
+        Passwords are deliberately left untouched (they may legitimately contain spaces).
+        """
+        for field in cls.TRIMMED_CAMERA_FIELDS:
+            value = cam_data.get(field)
+            if isinstance(value, str):
+                cam_data[field] = value.strip()
+        for field in cls.INTEGER_CAMERA_FIELDS:
+            value = cam_data.get(field)
+            if isinstance(value, str) and value.strip().lstrip("-").isdigit():
+                cam_data[field] = int(value.strip())
+        return cam_data
+
     def __init__(self, config_path: str = CONFIG_FILE):
         self.config_path = config_path
         self._lock = threading.RLock()
@@ -143,6 +168,12 @@ class ConfigManager:
                     self.data = copy.deepcopy(DEFAULT_CONFIG)
             else:
                 self.data = copy.deepcopy(DEFAULT_CONFIG)
+
+            # Repair user-entered camera fields saved with stray whitespace
+            # (e.g. username "admin ") so existing installs start working again.
+            for cam in self.data.get("cameras", []):
+                if isinstance(cam, dict):
+                    self.normalize_camera(cam)
 
             # Ensure users list exists and has default admin account
             users = self.data.get("users", [])
@@ -296,6 +327,7 @@ class ConfigManager:
 
     def add_camera(self, cam_data: Dict[str, Any]) -> Dict[str, Any]:
         with self._lock:
+            self.normalize_camera(cam_data)
             if "id" not in cam_data or not cam_data["id"]:
                 cam_data["id"] = f"cam-{uuid.uuid4().hex[:8]}"
             
@@ -315,6 +347,7 @@ class ConfigManager:
 
     def update_camera(self, camera_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         with self._lock:
+            self.normalize_camera(updates)
             for i, cam in enumerate(self.data.get("cameras", [])):
                 if cam.get("id") == camera_id:
                     cam.update(updates)

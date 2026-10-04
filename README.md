@@ -132,15 +132,124 @@ Transform any smartphone, iPad, tablet, or laptop into a live wireless CCTV came
 
 ---
 
+## 🧩 Hikvision: "Please install WebComponents.exe" (and similar IE plugins)
+
+Hikvision's own web UI asks for **WebComponents.exe** — an Internet Explorer ActiveX
+control — on the DS-2CD, ColorVu, AcuSense, TurboHD and most other Hikvision families.
+You do **not** need it, and you do not need Internet Explorer. That plugin talks to the
+camera over plain HTTP (ISAPI with Digest auth); OmniSight talks to the same interface.
+
+Plugin-free Hikvision sources, all used automatically:
+
+| Source | URL | Notes |
+|---|---|---|
+| **Live MJPEG** | `http://<ip>/ISAPI/Streaming/channels/101/httpPreview` | Continuous multipart video at full framerate — exactly what WebComponents.exe consumed |
+| Still image | `http://<ip>/ISAPI/Streaming/channels/101/picture` | Used when MJPEG is unavailable |
+| Older firmware | `http://<ip>/PSIA/Streaming/channels/101/picture` | PSIA API, pre-ISAPI models |
+| Legacy path | `http://<ip>/Streaming/Channels/101/picture` | Early firmware before `/ISAPI` |
+| RTSP | `rtsp://<ip>:554/Streaming/Channels/101` | Native stream, with `102` for sub-stream |
+
+`101` = channel 1 main stream (`102` = sub-stream; channel 2 = `201`, and so on).
+
+**If you want to check this yourself:** open `http://<camera-ip>/ISAPI/Streaming/channels/101/picture`
+in Chrome, Firefox or Safari and sign in with the camera username/password. You get a
+still image — no plugin prompt, no ActiveX, no IE. That same URL is what OmniSight polls.
+
+Order of preference in OmniSight: RTSP via FFmpeg when available → ISAPI/PSIA MJPEG
+(plugin-free, no FFmpeg needed) → ISAPI/PSIA snapshots → clear HUD message if the
+credentials or network are wrong. Digest authentication is fully supported, which is
+mandatory on Hikvision firmware.
+
+The same applies to Dahua/Amcrest (**webplugin.exe**, replaced by `/cgi-bin/mjpg/video.cgi`
+and `/cgi-bin/snapshot.cgi`) and other ActiveX-era plugins.
+
+---
+
+## 🧩 Cameras That "Require Internet Explorer" (ActiveX-only CCTV)
+
+Many older DVR boxes and Chinese OEM cameras have no usable video path outside their
+ActiveX control: the web UI shows a plugin download, and the RTSP port stays open with
+no working stream path. OmniSight drives these cameras through the one interface they
+*do* expose — a raw JPEG endpoint — and polls it at framerate in pure HTML5.
+
+How it works (no Internet Explorer, no plugin, no ActiveX):
+
+1. Pick the vendor **"Legacy Camera (Requires Internet Explorer / ActiveX)"** when adding
+   the camera. Snapshot polling is enabled automatically and RTSP is not assumed.
+2. OmniSight probes the camera's known still-image endpoints
+   (`/webcapture.jpg?command=snap&channel=N`, `/snapshot.jpg`, `/cgi-bin/snapshot.cgi`,
+   `/ISAPI/Streaming/channels/101/picture`, `/onvif-http/snapshot?Profile_1`, and more),
+   including the ActiveX-style query strings that bare paths fail to answer.
+3. The first endpoint that returns a real JPEG becomes the camera's source and is stored
+   on the camera config (`snapshot_url`), so it survives restarts.
+4. Basic **and** Digest authentication are supported, so password-protected cameras work.
+
+Frames are fetched **by the NVR server**, not by your browser. That matters because a
+browser on an HTTPS page (e.g. GitHub Pages) is blocked from calling `http://192.168.x.x`
+by mixed-content and CORS rules — routing through the server sidesteps both.
+
+If a legacy camera still shows an amber "auto-detecting snapshot endpoint" HUD, the endpoints
+it tried did not return a JPEG. Check the camera's web UI in a browser, then paste the
+working image path into **Edit Camera → Stream URL** (or set `snapshot_url`) and it will be
+used verbatim.
+
+---
+
+## 🩺 Camera Troubleshooting (Why is a camera not working?)
+
+Every camera card shows a real status dot driven by live telemetry, not by the static
+config value:
+
+| Dot | Status | Meaning | Typical cause |
+|---|---|---|---|
+| 🟢 | `streaming` | Frames are arriving from the camera | — |
+| 🟡 | `connecting` / `reconnecting` | Ingest worker is retrying | Wrong IP/port/password, camera offline, network blocked, or no FFmpeg for RTSP |
+| 🔴 | `error` | Ingestion cannot run at all | FFmpeg missing and the camera exposes no snapshot CGI |
+
+How a camera is ingested (in priority order):
+
+1. `webcam://` / USB → DirectShow / V4L2 capture.
+2. `node://` → Browser Camera Node ingestion.
+3. **ActiveX / "requires IE" cameras** → HTTP ingestion with automatic endpoint discovery
+   (see the sections above). These are never assumed to have a usable RTSP path.
+4. **Real network URL** (`rtsp://`, `rtsps://`, `rtmp://`, `*.m3u8`) → FFmpeg ingest with
+   automatic TCP → UDP → HTTP transport fallback. This now applies even if the camera still
+   has an old `is_simulated` flag set — a real source URL always wins.
+5. If FFmpeg is missing, or RTSP keeps failing, and the vendor exposes a plugin-free HTTP
+   source (Hikvision ISAPI `httpPreview`, Dahua `/cgi-bin/mjpg/video.cgi`, XM/ISAPI
+   snapshots, …) → **continuous MJPEG first, then snapshot polling** takes over.
+6. `sim://` (or no source URL at all) → procedural simulator.
+
+Checks worth running when a camera misbehaves:
+
+```bash
+# Is FFmpeg available? RTSP/RTMP/HLS ingestion needs it.
+curl -s http://localhost:8080/api/status | grep ffmpeg
+
+# What is this camera actually doing right now?
+curl -s -H "Authorization: Bearer <token>" http://localhost:8080/api/cameras/<id>/status
+```
+
+- **The host running OmniSight must be able to reach the camera.** Cameras on `192.168.x.x`
+  are only reachable from the machine on that LAN — a hosted/cloud instance cannot see them.
+- Run the built-in prober (`POST /api/cameras/probe`) to check ports, RTSP `DESCRIBE`,
+  codecs, and whether the credentials actually authenticate.
+- Credentials are trimmed automatically on save, so a stray space in a username
+  (`"admin "`) can no longer break every authentication attempt.
+- Editing a camera restarts its ingest worker immediately — no server restart required.
+
+---
+
 ## 📡 REST API Reference
 
 | Method | Endpoint | Description |
 |---|---|---|
 | `GET` | `/api/status` | System health, uptime, and ffmpeg status |
-| `GET` | `/api/cameras` | List configured cameras, active layout, and groups |
+| `GET` | `/api/cameras` | List configured cameras with live status telemetry, active layout, and groups |
 | `POST` | `/api/cameras` | Register a new camera (auto-constructs URLs from vendor presets) |
 | `PUT` | `/api/cameras/{id}` | Update existing camera configuration |
 | `DELETE` | `/api/cameras/{id}` | Delete a camera |
+| `GET` | `/api/cameras/{id}/status` | **Real** live camera state (`streaming`, `connecting`, `reconnecting`, `error`) + last frame age |
 | `GET` | `/api/cameras/{id}/stream` | Live multipart/x-mixed-replace MJPEG video feed |
 | `GET` | `/api/cameras/{id}/snapshot` | Fetch single frame JPEG still |
 | `POST` | `/api/cameras/{id}/ptz` | Pan/Tilt/Zoom action + Hardware dispatch (Hikvision ISAPI, Dahua CGI, Axis, Foscam) |
