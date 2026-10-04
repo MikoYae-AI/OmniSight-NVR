@@ -336,6 +336,23 @@
             <label style="font-size: 11px; color: var(--text-muted);">Hub URL (LAN IP, Tailscale, or https tunnel)</label>
             <input type="text" id="hubConnectorUrlInput" placeholder="https://your-tunnel.trycloudflare.com  ·  http://192.168.1.50:8080" style="font-family: monospace; font-size: 12px; padding: 8px 12px; width: 100%;">
           </div>
+
+          <!-- Optional sign-in (remembered via session token, never the password) -->
+          <div style="display: flex; gap: 10px; margin-top: 12px;">
+            <div class="form-group" style="flex: 1; margin-bottom: 0;">
+              <label style="font-size: 11px; color: var(--text-muted);">Username (optional)</label>
+              <input type="text" id="hubConnectorUserInput" autocomplete="username" placeholder="admin" style="font-size: 12px; padding: 8px 12px; width: 100%;">
+            </div>
+            <div class="form-group" style="flex: 1; margin-bottom: 0;">
+              <label style="font-size: 11px; color: var(--text-muted);">Password</label>
+              <input type="password" id="hubConnectorPassInput" autocomplete="current-password" placeholder="••••••••" style="font-size: 12px; padding: 8px 12px; width: 100%;">
+            </div>
+          </div>
+          <label style="display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 12px; color: var(--text-secondary); cursor: pointer;">
+            <input type="checkbox" id="hubConnectorRemember" checked style="width: auto;">
+            Remember me on this device <span style="color: var(--text-muted);">(stores a session token — never your password)</span>
+          </label>
+
           <p style="font-size: 11px; color: var(--text-muted); margin-top: 8px;">
             ⚠️ From an HTTPS page (e.g. GitHub Pages), browsers only allow <strong>https</strong> hub URLs —
             use the hub's Cloudflare tunnel URL (📶 4G Cloud panel), or simply open the hub URL directly

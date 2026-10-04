@@ -1361,6 +1361,9 @@ const hubConnectorModal = document.getElementById("hubConnectorModal");
 const btnHubConnector = document.getElementById("btnHubConnector");
 const btnCloseHubConnectorModal = document.getElementById("btnCloseHubConnectorModal");
 const hubConnectorUrlInput = document.getElementById("hubConnectorUrlInput");
+const hubConnectorUserInput = document.getElementById("hubConnectorUserInput");
+const hubConnectorPassInput = document.getElementById("hubConnectorPassInput");
+const hubConnectorRemember = document.getElementById("hubConnectorRemember");
 const hubConnectorStatus = document.getElementById("hubConnectorStatus");
 const btnConnectHub = document.getElementById("btnConnectHub");
 const btnDisconnectHub = document.getElementById("btnDisconnectHub");
@@ -1782,13 +1785,24 @@ function refreshHubConnectorUI() {
   if (!hubConnectorUrlInput || !hubConnectorStatus) return;
   const saved = getSavedHubUrl();
   if (!hubConnectorUrlInput.value && saved) hubConnectorUrlInput.value = saved;
-  hubConnectorStatus.textContent = saved
-    ? `Configured: ${saved}`
-    : "No hub configured — running in standalone mode.";
+  const hasToken = !!(sessionStorage.getItem("omnisight_token") || localStorage.getItem("omnisight_token"));
+  if (saved) {
+    hubConnectorStatus.textContent = hasToken
+      ? `Configured: ${saved} · signed in (token stored)`
+      : `Configured: ${saved}`;
+  } else {
+    hubConnectorStatus.textContent = "No hub configured — running in standalone mode.";
+  }
   hubConnectorStatus.style.color = saved ? "#34c759" : "#8e8e93";
 }
 
-function connectToHub() {
+function setHubConnectorBusy(busy) {
+  if (!btnConnectHub) return;
+  btnConnectHub.disabled = busy;
+  btnConnectHub.textContent = busy ? "Signing in…" : "🔌 Connect & Reload";
+}
+
+async function connectToHub() {
   const raw = (hubConnectorUrlInput ? hubConnectorUrlInput.value : "").trim();
   if (!raw) {
     showNotification("Enter a hub URL first.", "error");
@@ -1806,8 +1820,65 @@ function connectToHub() {
     return;
   }
   const clean = url.origin; // normalised, trailing slash/path stripped
+  const username = (hubConnectorUserInput ? hubConnectorUserInput.value : "").trim();
+  const password = hubConnectorPassInput ? hubConnectorPassInput.value : "";
+  const remember = hubConnectorRemember ? hubConnectorRemember.checked : true;
+  const mixedBlock = location.protocol === "https:" && url.protocol === "http:";
+
+  // An HTTPS page (e.g. GitHub Pages) can never reach a plain-http hub —
+  // with credentials involved, fail fast instead of saving a dead config.
+  if (mixedBlock && (username || password)) {
+    showNotification(
+      "This HTTPS page can't sign in to a plain-http hub (browser mixed-content rule). Open the hub URL directly in a new tab, or use the hub's https tunnel URL.",
+      "error"
+    );
+    return;
+  }
+
+  if (username || password) {
+    if (!username || !password) {
+      showNotification("Enter both username and password, or leave both empty.", "error");
+      return;
+    }
+    // Sign in to the hub. Only the returned session token is stored in the
+    // browser — never the password itself.
+    setHubConnectorBusy(true);
+    try {
+      const res = await fetch(`${clean}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.token) {
+        showNotification(data.error || "Sign-in failed — check the username and password.", "error");
+        setHubConnectorBusy(false);
+        return;
+      }
+      authToken = data.token;
+      if (remember) {
+        localStorage.setItem("omnisight_token", data.token);
+        sessionStorage.removeItem("omnisight_token");
+      } else {
+        sessionStorage.setItem("omnisight_token", data.token);
+        localStorage.removeItem("omnisight_token");
+      }
+      showNotification(
+        `Signed in as ${data.username || username}${remember ? " — remembered on this device" : " — this browser session only"}.`,
+        "success"
+      );
+    } catch (e) {
+      showNotification("Hub unreachable — check the URL and that the hub is running.", "error");
+      setHubConnectorBusy(false);
+      return;
+    } finally {
+      if (hubConnectorPassInput) hubConnectorPassInput.value = ""; // never keep the password in the DOM
+      setHubConnectorBusy(false);
+    }
+  }
+
   localStorage.setItem("omnisight_hub_url", clean);
-  if (location.protocol === "https:" && url.protocol === "http:") {
+  if (mixedBlock) {
     showNotification(
       "Saved — but browsers block this HTTPS page from calling a plain-http hub. Use an https tunnel URL, or open the hub URL directly.",
       "warning"
@@ -1820,7 +1891,20 @@ function connectToHub() {
 }
 
 function disconnectHub() {
+  const saved = getSavedHubUrl();
+  if (authToken && saved) {
+    // Best-effort server-side logout; the local token is wiped regardless.
+    try {
+      fetch(`${saved}/api/auth/logout`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${authToken}` }
+      });
+    } catch (e) { /* ignore */ }
+  }
   localStorage.removeItem("omnisight_hub_url");
+  localStorage.removeItem("omnisight_token");
+  sessionStorage.removeItem("omnisight_token");
+  authToken = "";
   location.reload();
 }
 

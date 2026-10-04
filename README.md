@@ -175,6 +175,22 @@ Two rules worth knowing:
    for a permanent connector use a named Cloudflare tunnel or Tailscale (both covered in
    *Remote Access* below).
 
+#### Signing in through the connector (remembered logins)
+
+The connector also takes an optional **username + password**. On Connect, the website
+signs in against the hub (`POST /api/auth/login`) and stores only the returned **session
+token** — never the password — so the site remembers you across visits:
+
+- **Remember me** checked → token kept in `localStorage` (survives browser restarts).
+- Unchecked → token kept in `sessionStorage` (forgotten when the tab closes).
+
+No extra database is needed for this: hub user accounts already live in
+`data/cameras.json` (salted password hashes, default account `admin` — **change the
+default password via 🔑 Password after first login**), and sessions last 24 h or until the
+hub restarts, after which the site simply asks you to sign in again. (If you ever want a
+real database, Python's built-in `sqlite3` is the natural zero-install upgrade path, but
+at NVR scale the JSON store is fine.)
+
 ---
 
 ## 📋 Universal Camera Compatibility Matrix (40+ Brands & Standards)
