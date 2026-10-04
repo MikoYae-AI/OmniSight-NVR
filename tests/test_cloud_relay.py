@@ -40,6 +40,17 @@ class TestCloudRelay(unittest.TestCase):
         self.assertIn("local_ip", status)
         self.assertIn("local_url", status)
 
+    def test_manager_hosted_url(self):
+        crm = CloudRelayManager(8080)
+        crm.cloud_url = "https://test-subdomain.trycloudflare.com"
+        crm.status = "connected"
+        status = crm.get_status()
+        self.assertIn("hosted_url", status)
+        self.assertEqual(
+            status["hosted_url"],
+            "https://mikoyae-ai.github.io/OmniSight-NVR/?hub=https://test-subdomain.trycloudflare.com"
+        )
+
     def test_get_cloud_relay_endpoint(self):
         url = f"http://127.0.0.1:{self.port}/api/cloud-relay"
         req = urllib.request.Request(url)

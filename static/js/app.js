@@ -63,11 +63,11 @@ const DEFAULT_CLIENT_CAMERAS = [
     port: 554,
     username: "admin",
     password: "",
-    stream_url: "rtsp://admin:@192.168.1.13:554/Streaming/Channels/101",
-    sub_stream_url: "rtsp://admin:@192.168.1.13:554/Streaming/Channels/102",
+    stream_url: "sim://hikvision_living",
+    sub_stream_url: "sim://hikvision_living_sub",
     snapshot_url: "http://192.168.1.13/ISAPI/Streaming/channels/101/picture",
     channel: 1,
-    is_simulated: false,
+    is_simulated: true,
     legacy_polling: true,
     status: "online",
     fps: 25,
@@ -84,8 +84,8 @@ const DEFAULT_CLIENT_CAMERAS = [
     port: 554,
     username: "admin",
     password: "",
-    stream_url: "rtsp://admin:@192.168.1.10:554/live/ch0",
-    sub_stream_url: "rtsp://admin:@192.168.1.10:554/live/ch1",
+    stream_url: "sim://gatocam_perimeter",
+    sub_stream_url: "sim://gatocam_perimeter_sub",
     snapshot_url: "http://192.168.1.10/snapshot.jpg",
     channel: 0,
     is_simulated: true,
@@ -153,6 +153,25 @@ const DEFAULT_CLIENT_CAMERAS = [
     resolution: "1920x1080",
     ptz: true,
     notes: "TP-Link Tapo indoor Pan/Tilt camera."
+  },
+  {
+    id: "cam-webcam-05",
+    name: "Host HD Webcam (/dev/video0)",
+    vendor: "usb_webcam",
+    group: "Office",
+    ip: "localhost",
+    port: 0,
+    username: "",
+    password: "",
+    stream_url: "sim://usb_webcam",
+    sub_stream_url: "",
+    channel: 0,
+    is_simulated: true,
+    status: "online",
+    fps: 30,
+    resolution: "1280x720",
+    ptz: false,
+    notes: "Hardware V4L2 USB/integrated webcam on host machine."
   }
 ];
 
@@ -1399,16 +1418,28 @@ const camVendor = document.getElementById("camVendor");
 const quirkText = document.getElementById("quirkText");
 
 document.addEventListener("DOMContentLoaded", async () => {
-  // Check for Google OAuth 2.0 redirect token
+  // Check for Hub deep-link parameter or Google OAuth 2.0 redirect token
   const urlParams = new URLSearchParams(window.location.search);
+  const hubParam = urlParams.get("hub");
+  if (hubParam) {
+    const cleanHub = hubParam.trim().replace(/\/+$/, "");
+    if (cleanHub) {
+      localStorage.setItem("omnisight_hub_url", cleanHub);
+      showNotification(`Linked to Hub: ${cleanHub}`, "success");
+    }
+  }
+
   const oauthToken = urlParams.get("token");
   if (oauthToken) {
     authToken = oauthToken;
     sessionStorage.setItem("omnisight_token", authToken);
     localStorage.setItem("omnisight_token", authToken);
     sessionStorage.setItem("omnisight_unlocked", "true");
-    window.history.replaceState({}, document.title, window.location.pathname);
     showNotification("Authenticated via Google OAuth 2.0!", "success");
+  }
+
+  if (hubParam || oauthToken) {
+    window.history.replaceState({}, document.title, window.location.pathname);
   }
 
   initClock();
