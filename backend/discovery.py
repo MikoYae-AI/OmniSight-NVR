@@ -286,47 +286,72 @@ def probe_rtsp_with_credentials(
     username: str,
     password: str,
     www_auth: str = "",
-    timeout: float = 1.0
+    timeout: float = 1.5
 ) -> bool:
     """
-    Tests credentials against an RTSP endpoint using Basic or Digest authentication.
+    Tests credentials against an RTSP endpoint using Digest and Basic authentication
+    on the same TCP connection so session-bound nonces (e.g. Hikvision R6) are respected.
     Returns True if the camera returns 200 OK.
     """
     if not path.startswith("/"):
         path = f"/{path}"
     uri = f"rtsp://{ip}:{port}{path}"
 
-    auth_header = ""
-    if www_auth and "digest" in www_auth.lower():
-        realm_m = re.search(r'realm="([^"]+)"', www_auth, re.IGNORECASE)
-        nonce_m = re.search(r'nonce="([^"]+)"', www_auth, re.IGNORECASE)
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(timeout)
+    try:
+        s.connect((ip, port))
+        # Step 1: Send initial DESCRIBE on this socket to obtain a fresh session-bound nonce
+        req1 = (
+            f"DESCRIBE {uri} RTSP/1.0\r\n"
+            f"CSeq: 1\r\n"
+            f"User-Agent: OmniSight-Universal-NVR/2.0\r\n"
+            f"Accept: application/sdp\r\n\r\n"
+        )
+        s.sendall(req1.encode("utf-8"))
+        resp1 = s.recv(4096).decode("utf-8", errors="ignore")
+        if "RTSP/1." in resp1 and " 200 " in resp1:
+            return True
+
+        # Step 2: Try Digest Auth using the fresh nonce from resp1
+        realm_m = re.search(r'realm="([^"]+)"', resp1, re.IGNORECASE)
+        nonce_m = re.search(r'nonce="([^"]+)"', resp1, re.IGNORECASE)
         if realm_m and nonce_m:
             realm = realm_m.group(1)
             nonce = nonce_m.group(1)
             ha1 = hashlib.md5(f"{username}:{realm}:{password}".encode("utf-8")).hexdigest()
             ha2 = hashlib.md5(f"DESCRIBE:{uri}".encode("utf-8")).hexdigest()
             response_hash = hashlib.md5(f"{ha1}:{nonce}:{ha2}".encode("utf-8")).hexdigest()
-            auth_header = f'Authorization: Digest username="{username}", realm="{realm}", nonce="{nonce}", uri="{uri}", response="{response_hash}"\r\n'
+            digest_header = (
+                f'Authorization: Digest username="{username}", realm="{realm}", '
+                f'nonce="{nonce}", uri="{uri}", response="{response_hash}"\r\n'
+            )
+            req2 = (
+                f"DESCRIBE {uri} RTSP/1.0\r\n"
+                f"CSeq: 2\r\n"
+                f"{digest_header}"
+                f"User-Agent: OmniSight-Universal-NVR/2.0\r\n"
+                f"Accept: application/sdp\r\n\r\n"
+            )
+            s.sendall(req2.encode("utf-8"))
+            resp2 = s.recv(4096).decode("utf-8", errors="ignore")
+            if "RTSP/1." in resp2 and " 200 " in resp2:
+                return True
 
-    if not auth_header:
+        # Step 3: Fallback to Basic Auth (many Hikvision DS-2CD R6 cameras offer both
+        # Digest and Basic headers, and accept Basic when Digest realm is MAC-locked)
         token = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
-        auth_header = f"Authorization: Basic {token}\r\n"
-
-    req_text = (
-        f"DESCRIBE {uri} RTSP/1.0\r\n"
-        f"CSeq: 2\r\n"
-        f"{auth_header}"
-        f"User-Agent: OmniSight-Universal-NVR/2.0\r\n"
-        f"Accept: application/sdp\r\n\r\n"
-    )
-
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.settimeout(timeout)
-    try:
-        s.connect((ip, port))
-        s.sendall(req_text.encode("utf-8"))
-        resp = s.recv(2048).decode("utf-8", errors="ignore")
-        if "RTSP/1." in resp and " 200 " in resp:
+        basic_header = f"Authorization: Basic {token}\r\n"
+        req3 = (
+            f"DESCRIBE {uri} RTSP/1.0\r\n"
+            f"CSeq: 3\r\n"
+            f"{basic_header}"
+            f"User-Agent: OmniSight-Universal-NVR/2.0\r\n"
+            f"Accept: application/sdp\r\n\r\n"
+        )
+        s.sendall(req3.encode("utf-8"))
+        resp3 = s.recv(4096).decode("utf-8", errors="ignore")
+        if "RTSP/1." in resp3 and " 200 " in resp3:
             return True
     except Exception:
         pass
@@ -595,9 +620,13 @@ def probe_camera_connection(
         if password_status == "none_required":
             cred = ""
         elif discovered_username or discovered_password:
-            cred = f"{discovered_username}:{discovered_password}@" if (discovered_username and discovered_password) else (f"{discovered_username}@" if discovered_username else "")
+            u_s = (discovered_username or "").replace("@", "%40")
+            p_s = (discovered_password or "").replace("@", "%40")
+            cred = f"{u_s}:{p_s}@" if (u_s and p_s) else (f"{u_s}@" if u_s else "")
         else:
-            cred = f"{username}:{password}@" if (username and password) else (f"{username}@" if username else "")
+            u_s = (username or "").replace("@", "%40")
+            p_s = (password or "").replace("@", "%40")
+            cred = f"{u_s}:{p_s}@" if (u_s and p_s) else (f"{u_s}@" if u_s else "")
 
         final_stream_url = f"rtsp://{cred}{ip}:{rtsp_port}{confirmed_rtsp_path}"
         # Guess sub-stream

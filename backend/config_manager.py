@@ -18,6 +18,27 @@ CONFIG_FILE = os.path.join(os.path.dirname(__file__), "..", "data", "cameras.jso
 
 DEFAULT_CAMERAS = [
     {
+        "id": "cam-hikvision-13",
+        "name": "Hikvision DS-2CD2420F-IW (Live)",
+        "vendor": "hikvision",
+        "group": "Living Area",
+        "ip": "192.168.1.13",
+        "port": 554,
+        "username": "admin",
+        "password": "Hik@1234",
+        "stream_url": "rtsp://admin:Hik%401234@192.168.1.13:554/Streaming/Channels/101",
+        "sub_stream_url": "rtsp://admin:Hik%401234@192.168.1.13:554/Streaming/Channels/102",
+        "snapshot_url": "http://192.168.1.13:80/ISAPI/Streaming/channels/101/picture",
+        "channel": 1,
+        "is_simulated": False,
+        "legacy_polling": False,
+        "status": "online",
+        "fps": 20,
+        "resolution": "1920x1080",
+        "ptz": True,
+        "notes": "Hikvision 2MP Cube IP Camera (DS-2CD2420F-IW, R6 Platform)."
+    },
+    {
         "id": "cam-hikvision-01",
         "name": "Hikvision DS-2CD Gate",
         "vendor": "hikvision",

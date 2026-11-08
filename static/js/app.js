@@ -62,15 +62,15 @@ const DEFAULT_CLIENT_CAMERAS = [
     ip: "192.168.1.13",
     port: 554,
     username: "admin",
-    password: "",
-    stream_url: "sim://hikvision_living",
-    sub_stream_url: "sim://hikvision_living_sub",
+    password: "Hik@1234",
+    stream_url: "rtsp://admin:Hik%401234@192.168.1.13:554/Streaming/Channels/101",
+    sub_stream_url: "rtsp://admin:Hik%401234@192.168.1.13:554/Streaming/Channels/102",
     snapshot_url: "http://192.168.1.13/ISAPI/Streaming/channels/101/picture",
     channel: 1,
-    is_simulated: true,
+    is_simulated: false,
     legacy_polling: false,
     status: "online",
-    fps: 25,
+    fps: 20,
     resolution: "1920x1080",
     ptz: true,
     notes: "Hikvision 2MP Cube IP Camera (DS-2CD2420F-IW, R6 Platform)."
@@ -3466,7 +3466,9 @@ function autoGenerateUrl() {
   }
 
   const preset = vendorPresets[vendor] || BUILTIN_PRESETS[vendor] || BUILTIN_PRESETS["generic_rtsp"];
-  const creds = username && password ? `${username}:${password}@` : (username ? `${username}@` : "");
+  const safeUser = username ? username.replace(/@/g, "%40") : "";
+  const safePass = password ? password.replace(/@/g, "%40") : "";
+  const creds = safeUser && safePass ? `${safeUser}:${safePass}@` : (safeUser ? `${safeUser}@` : "");
   const snapPattern = preset?.snapshot_pattern || preset?.snapshot_url;
 
   // IE/ActiveX-era cameras: their usable source is the raw JPEG endpoint, not RTSP.

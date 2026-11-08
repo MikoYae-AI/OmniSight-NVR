@@ -1017,12 +1017,15 @@ def build_stream_url(
     patterns = preset.get("rtsp_patterns", {})
     template = patterns.get(stream_type) or patterns.get("main") or "rtsp://{username}:{password}@{ip}:{port}/{path}"
 
-    # Handle credentials
+    # Handle credentials (URL-encode '@' inside username/password so RTSP URLs with e.g. 'Hik@1234' never break)
     cred_part = ""
     if username and password:
-        cred_part = f"{username}:{password}@"
+        u_safe = username.replace("@", "%40")
+        p_safe = password.replace("@", "%40")
+        cred_part = f"{u_safe}:{p_safe}@"
     elif username:
-        cred_part = f"{username}@"
+        u_safe = username.replace("@", "%40")
+        cred_part = f"{u_safe}@"
 
     # Replace in template cleanly
     if "{username}:{password}@" in template:

@@ -840,10 +840,353 @@ class CameraStreamSession:
             pass
         self._simulation_loop()
 
+    def _rtsp_tcp_basic_depacketizer(self, target_fps: int) -> int:
+        """
+        Native RTSP/TCP Interleaved RTP Depacketizer with Basic & Digest Auth.
+        Specifically handles Hikvision DS-2CD R6 platform cameras where:
+          1. The password contains '@' or special characters, OR
+          2. The camera advertises both Digest and Basic WWW-Authenticate headers,
+             causing FFmpeg's libavformat to fail on Digest while Basic succeeds.
+        Streams raw H.264/HEVC Annex-B NAL units into an FFmpeg stdin decoder pipe
+        and updates `self._latest_jpeg` at full framerate with zero latency.
+        Returns the number of decoded JPEG frames received during the session.
+        """
+        import socket
+        import struct
+        import base64
+        import hashlib
+
+        raw_url = (self.stream_url or "").strip()
+        ip = (self.camera_info.get("ip") or "").strip()
+        port = int(self.camera_info.get("port", 554) or 554)
+        username = self.camera_info.get("username", "admin")
+        password = self.camera_info.get("password", "")
+
+        # Extract path (and host/port if not in camera_info) without failing on unescaped '@' in password
+        m_url = re.match(r"^rtsps?://(?:(.+)@)?([^/:]+)(?::(\d+))?(/.*)?$", raw_url, re.IGNORECASE)
+        if m_url:
+            cred_part, url_host, url_port, url_path = m_url.groups()
+            if not ip and url_host:
+                ip = url_host
+            if url_port:
+                port = int(url_port)
+            path = url_path or "/Streaming/Channels/101"
+            if cred_part and ":" in cred_part and not password:
+                u_part, p_part = cred_part.split(":", 1)
+                username = urllib.parse.unquote(u_part)
+                password = urllib.parse.unquote(p_part)
+        else:
+            path = "/Streaming/Channels/101"
+
+        if not ip:
+            return 0
+
+        clean_uri = f"rtsp://{ip}:{port}{path}"
+        basic_token = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
+        basic_auth = f"Authorization: Basic {basic_token}\r\n"
+
+        sock = None
+        proc = None
+        frames_received = 0
+
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5.0)
+            sock.connect((ip, port))
+
+            # 1. DESCRIBE with Basic Auth first (accepted immediately by Hikvision R6)
+            cseq = 1
+            desc_req = (
+                f"DESCRIBE {clean_uri} RTSP/1.0\r\n"
+                f"CSeq: {cseq}\r\n"
+                f"{basic_auth}"
+                f"User-Agent: OmniSight-NVR/2.0\r\n"
+                f"Accept: application/sdp\r\n\r\n"
+            )
+            sock.sendall(desc_req.encode("utf-8"))
+            resp = sock.recv(8192).decode("utf-8", errors="ignore")
+
+            auth_header = basic_auth
+            if " 401 " in resp:
+                # Try Digest if Basic was rejected
+                realm_m = re.search(r'realm="([^"]+)"', resp, re.IGNORECASE)
+                nonce_m = re.search(r'nonce="([^"]+)"', resp, re.IGNORECASE)
+                if realm_m and nonce_m:
+                    realm = realm_m.group(1)
+                    nonce = nonce_m.group(1)
+                    ha1 = hashlib.md5(f"{username}:{realm}:{password}".encode("utf-8")).hexdigest()
+                    ha2 = hashlib.md5(f"DESCRIBE:{clean_uri}".encode("utf-8")).hexdigest()
+                    resp_hash = hashlib.md5(f"{ha1}:{nonce}:{ha2}".encode("utf-8")).hexdigest()
+                    auth_header = (
+                        f'Authorization: Digest username="{username}", realm="{realm}", '
+                        f'nonce="{nonce}", uri="{clean_uri}", response="{resp_hash}"\r\n'
+                    )
+                    cseq += 1
+                    desc_req2 = (
+                        f"DESCRIBE {clean_uri} RTSP/1.0\r\n"
+                        f"CSeq: {cseq}\r\n"
+                        f"{auth_header}"
+                        f"User-Agent: OmniSight-NVR/2.0\r\n"
+                        f"Accept: application/sdp\r\n\r\n"
+                    )
+                    sock.sendall(desc_req2.encode("utf-8"))
+                    resp = sock.recv(8192).decode("utf-8", errors="ignore")
+
+            if " 200 " not in resp:
+                return 0
+
+            # Parse SDP for video track control URL and sprop-parameter-sets (SPS/PPS)
+            sdp_body = resp.split("\r\n\r\n", 1)[1] if "\r\n\r\n" in resp else resp
+            track_ctrl = f"{clean_uri}/trackID=1"
+            in_video = False
+            for line in sdp_body.splitlines():
+                line_s = line.strip()
+                if line_s.startswith("m=video"):
+                    in_video = True
+                elif line_s.startswith("m="):
+                    in_video = False
+                elif in_video and line_s.startswith("a=control:"):
+                    ctrl_val = line_s[len("a=control:"):].strip()
+                    if ctrl_val.startswith("rtsp://"):
+                        track_ctrl = ctrl_val
+                    else:
+                        track_ctrl = f"{clean_uri.rstrip('/')}/{ctrl_val.lstrip('/')}"
+                    break
+
+            sprop_nals = bytearray()
+            m_sprop = re.search(r"sprop-parameter-sets=([^;\r\n]+)", sdp_body)
+            if m_sprop:
+                for b64_nal in m_sprop.group(1).split(","):
+                    b64_clean = b64_nal.strip()
+                    if b64_clean:
+                        try:
+                            sprop_nals.extend(b"\x00\x00\x00\x01" + base64.b64decode(b64_clean))
+                        except Exception:
+                            pass
+
+            # 2. SETUP RTP/AVP/TCP interleaved channel 0-1
+            cseq += 1
+            setup_req = (
+                f"SETUP {track_ctrl} RTSP/1.0\r\n"
+                f"CSeq: {cseq}\r\n"
+                f"{auth_header}"
+                f"Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n"
+                f"User-Agent: OmniSight-NVR/2.0\r\n\r\n"
+            )
+            sock.sendall(setup_req.encode("utf-8"))
+            r_setup = sock.recv(4096).decode("utf-8", errors="ignore")
+            if " 200 " not in r_setup:
+                return 0
+
+            sess_m = re.search(r"Session:\s*([^;\r\n]+)", r_setup, re.IGNORECASE)
+            session_id = sess_m.group(1).strip() if sess_m else ""
+
+            # 3. PLAY
+            cseq += 1
+            play_req = (
+                f"PLAY {clean_uri}/ RTSP/1.0\r\n"
+                f"CSeq: {cseq}\r\n"
+                f"{auth_header}"
+                f"Session: {session_id}\r\n"
+                f"Range: npt=0.000-\r\n"
+                f"User-Agent: OmniSight-NVR/2.0\r\n\r\n"
+            )
+            sock.sendall(play_req.encode("utf-8"))
+            r_play = sock.recv(8192)
+            if b" 200 " not in r_play[:200]:
+                return 0
+
+            # Launch FFmpeg H.264 Annex-B -> MJPEG low-latency pipe decoder
+            fps = str(target_fps)
+            ffmpeg_cmd = [
+                FFMPEG_BIN,
+                "-hide_banner",
+                "-loglevel", "error",
+                "-threads", "1",
+                "-fflags", "nobuffer+discardcorrupt",
+                "-flags", "low_delay",
+                "-f", "h264",
+                "-i", "pipe:0",
+                "-vf", "scale='min(1280,iw)':-2:flags=fast_bilinear",
+                "-f", "image2pipe",
+                "-vcodec", "mjpeg",
+                "-q:v", "5",
+                "-r", fps,
+                "-flush_packets", "1",
+                "pipe:1",
+            ]
+            proc = subprocess.Popen(
+                ffmpeg_cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                bufsize=0,
+            )
+
+            # Background reader thread that drains decoded JPEG frames from FFmpeg stdout
+            def _stdout_reader():
+                nonlocal frames_received
+                out_buf = bytearray()
+                try:
+                    while self._running and proc.poll() is None:
+                        chunk = proc.stdout.read(32768)
+                        if not chunk:
+                            break
+                        out_buf.extend(chunk)
+                        latest_jpeg = _drain_latest_jpeg(out_buf)
+                        if latest_jpeg:
+                            frames_received += 1
+                            with self._lock:
+                                self._latest_jpeg = latest_jpeg
+                                self._last_frame_time = time.time()
+                                self.connection_status = "streaming"
+                                self.reconnect_count = 0
+                                self.last_error = ""
+                except Exception:
+                    pass
+
+            reader_thread = threading.Thread(target=_stdout_reader, daemon=True)
+            reader_thread.start()
+
+            if sprop_nals and proc.stdin:
+                proc.stdin.write(bytes(sprop_nals))
+
+            # Seed RTP buffer with any bytes trailing the RTSP PLAY header
+            hdr_end = r_play.find(b"\r\n\r\n")
+            rtp_buf = bytearray(r_play[hdr_end + 4:] if hdr_end != -1 else b"")
+            fu_buf = bytearray()
+            last_keepalive = time.time()
+
+            sock.settimeout(4.0)
+            while self._running and proc.poll() is None:
+                chunk = sock.recv(65536)
+                if not chunk:
+                    break
+                rtp_buf.extend(chunk)
+
+                # Send periodic RTSP OPTIONS keepalive every 25s so 60s camera session never times out
+                now = time.time()
+                if now - last_keepalive > 25.0 and session_id:
+                    last_keepalive = now
+                    cseq += 1
+                    ka = (
+                        f"OPTIONS {clean_uri} RTSP/1.0\r\n"
+                        f"CSeq: {cseq}\r\n"
+                        f"{auth_header}"
+                        f"Session: {session_id}\r\n\r\n"
+                    )
+                    try:
+                        sock.sendall(ka.encode("utf-8"))
+                    except Exception:
+                        break
+
+                out_nals = bytearray()
+                while len(rtp_buf) >= 4:
+                    if rtp_buf[0] != 0x24:  # '$' magic byte for RTSP interleaved frame
+                        # Skip any inline RTSP text reply (e.g. OPTIONS 200 OK)
+                        if rtp_buf.startswith(b"RTSP/1."):
+                            end_idx = rtp_buf.find(b"\r\n\r\n")
+                            if end_idx == -1:
+                                break
+                            del rtp_buf[:end_idx + 4]
+                            continue
+                        dollar_idx = rtp_buf.find(b"$")
+                        if dollar_idx == -1:
+                            rtp_buf.clear()
+                            break
+                        del rtp_buf[:dollar_idx]
+                        if len(rtp_buf) < 4:
+                            break
+
+                    ch = rtp_buf[1]
+                    plen = struct.unpack("!H", rtp_buf[2:4])[0]
+                    if len(rtp_buf) < 4 + plen:
+                        break
+
+                    pkt = bytes(rtp_buf[4:4 + plen])
+                    del rtp_buf[:4 + plen]
+
+                    if ch != 0 or len(pkt) < 12:
+                        continue
+
+                    # Parse RTP header
+                    cc = pkt[0] & 0x0F
+                    ext = (pkt[0] >> 4) & 0x01
+                    pad = (pkt[0] >> 5) & 0x01
+                    offset = 12 + cc * 4
+                    if ext and len(pkt) >= offset + 4:
+                        ext_len = struct.unpack("!H", pkt[offset + 2:offset + 4])[0] * 4
+                        offset += 4 + ext_len
+                    end = len(pkt) - (pkt[-1] if pad else 0)
+                    if offset >= end:
+                        continue
+                    payload = pkt[offset:end]
+                    if not payload:
+                        continue
+
+                    nal_type = payload[0] & 0x1F
+                    if 1 <= nal_type <= 23:
+                        if nal_type == 5 and sprop_nals:
+                            out_nals.extend(sprop_nals)
+                        out_nals.extend(b"\x00\x00\x00\x01" + payload)
+                    elif nal_type == 24:  # STAP-A
+                        idx = 1
+                        while idx + 2 <= len(payload):
+                            sz = struct.unpack("!H", payload[idx:idx + 2])[0]
+                            idx += 2
+                            if idx + sz <= len(payload):
+                                out_nals.extend(b"\x00\x00\x00\x01" + payload[idx:idx + sz])
+                            idx += sz
+                    elif nal_type == 28 and len(payload) >= 2:  # FU-A fragmented NAL unit
+                        fu_ind = payload[0]
+                        fu_hdr = payload[1]
+                        start_bit = (fu_hdr >> 7) & 1
+                        end_bit = (fu_hdr >> 6) & 1
+                        orig_type = fu_hdr & 0x1F
+                        orig_nal_hdr = (fu_ind & 0xE0) | orig_type
+                        if start_bit:
+                            fu_buf = bytearray(b"\x00\x00\x00\x01" + bytes([orig_nal_hdr]) + payload[2:])
+                        elif fu_buf:
+                            fu_buf.extend(payload[2:])
+                        if end_bit and fu_buf:
+                            if orig_type == 5 and sprop_nals:
+                                out_nals.extend(sprop_nals)
+                            out_nals.extend(fu_buf)
+                            fu_buf.clear()
+
+                if out_nals and proc.stdin:
+                    try:
+                        proc.stdin.write(bytes(out_nals))
+                    except Exception:
+                        break
+
+        except Exception as exc:
+            self.last_error = str(exc) or exc.__class__.__name__
+        finally:
+            if sock:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+            if proc:
+                try:
+                    if proc.stdin:
+                        proc.stdin.close()
+                    if proc.stdout:
+                        proc.stdout.close()
+                    proc.terminate()
+                    proc.wait(timeout=1.0)
+                except Exception:
+                    pass
+
+        return frames_received
+
     def _ffmpeg_universal_stream_loop(self):
         """
         Universal Stream Ingestion Engine with Dynamic Transport Fallback & Resilient Auto-Reconnect.
-        Tries UDP -> TCP -> HTTP tunneling. Discards backlogged/stale frames to guarantee true zero latency.
+        Tries UDP -> TCP -> HTTP tunneling, plus Native RTSP/TCP Interleaved Depacketizer for
+        Hikvision R6 / Basic-Auth / special-character-password cameras.
+        Discards backlogged/stale frames to guarantee true zero latency.
         """
         transports = ["udp", "tcp", "http"]
         current_transport_idx = 0
@@ -855,15 +1198,27 @@ class CameraStreamSession:
             target_fps = min(30, max(5, int(self.camera_info.get("fps", 20) or 20)))
             fps = str(target_fps)
 
+            # Ensure unescaped '@' in password inside stream_url is safely URL-encoded for FFmpeg
+            effective_url = self.stream_url
+            m_rtsp = re.match(r"^(rtsps?://)(.+)(@[^/@]+)$", effective_url, re.IGNORECASE)
+            if m_rtsp and ":" in m_rtsp.group(2):
+                scheme_p, userpass_p, hostpath_p = m_rtsp.groups()
+                u_raw, p_raw = userpass_p.split(":", 1)
+                if "@" in p_raw or "%" not in p_raw:
+                    u_enc = urllib.parse.quote(urllib.parse.unquote(u_raw), safe="")
+                    p_enc = urllib.parse.quote(urllib.parse.unquote(p_raw), safe="")
+                    effective_url = f"{scheme_p}{u_enc}:{p_enc}{hostpath_p}"
+
             # Build low-latency ingestion pipeline
             input_flags = [
+                "-threads", "1",
                 "-fflags", "nobuffer+discardcorrupt",
                 "-flags", "low_delay",
                 "-avioflags", "direct",
                 "-probesize", "64000",
                 "-analyzeduration", "0",
             ]
-            if any(self.stream_url.startswith(s) for s in ("rtsp://", "rtsps://")):
+            if any(effective_url.startswith(s) for s in ("rtsp://", "rtsps://")):
                 input_flags.extend([
                     "-rtsp_transport", transport,
                     "-buffer_size", "1024000",
@@ -875,7 +1230,7 @@ class CameraStreamSession:
                 "-hide_banner",
                 "-loglevel", "error",
                 *input_flags,
-                "-i", self.stream_url,
+                "-i", effective_url,
                 "-vf", "scale='min(1280,iw)':-2:flags=fast_bilinear",
                 "-f", "image2pipe",
                 "-vcodec", "mjpeg",
@@ -925,6 +1280,16 @@ class CameraStreamSession:
 
             if not self._running:
                 break
+
+            # If direct FFmpeg RTSP URL failed to yield frames (e.g. Hikvision DS-2CD R6 Basic/Digest
+            # negotiation quirk), engage the native Python RTSP/TCP Interleaved RTP depacketizer!
+            if frames_received == 0 and any(effective_url.startswith(s) for s in ("rtsp://", "rtsps://")):
+                depack_frames = self._rtsp_tcp_basic_depacketizer(target_fps)
+                if depack_frames > 0:
+                    frames_received += depack_frames
+                    backoff = 1.0
+                if not self._running:
+                    break
 
             # If stream failed very quickly without receiving frames, switch transport protocol
             session_duration = time.time() - t_connect_start
@@ -1384,7 +1749,7 @@ class CameraStreamSession:
         return buf.getvalue()
 
     def _simulation_loop(self):
-        """Generates procedural surveillance frames with vendor-authentic OSDs."""
+        """Generates procedural surveillance frames with vendor-authentic OSDs (eco-throttled when idle)."""
         self.connection_status = "streaming"
         frame_interval = 1.0 / max(10, self.camera_info.get("fps", 25))
         frame_count = 0
@@ -1397,9 +1762,13 @@ class CameraStreamSession:
             with self._lock:
                 self._latest_jpeg = jpeg_bytes
                 self._last_frame_time = time.time()
+                subscribers = self.active_subscribers
 
             elapsed = time.time() - t0
-            sleep_time = max(0.01, frame_interval - elapsed)
+            # Eco-Mode: When no client is actively viewing this simulated feed, render at 2 FPS
+            # to keep host CPU usage near 0% while keeping telemetry healthy (<10s age).
+            effective_interval = frame_interval if subscribers > 0 else 0.5
+            sleep_time = max(0.01, effective_interval - elapsed)
             time.sleep(sleep_time)
 
     def _generate_simulated_frame(self, frame_idx: int) -> bytes:

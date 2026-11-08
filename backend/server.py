@@ -980,6 +980,8 @@ class OmniSightHandler(BaseHTTPRequestHandler):
         frame_interval = 1.0 / target_fps
         last_frame_bytes = None
 
+        with session._lock:
+            session.active_subscribers += 1
         try:
             while True:
                 t0 = time.time()
@@ -1005,6 +1007,9 @@ class OmniSightHandler(BaseHTTPRequestHandler):
         except Exception:
             # Handle client close
             pass
+        finally:
+            with session._lock:
+                session.active_subscribers = max(0, session.active_subscribers - 1)
 
 
 def run_server(host: str = "0.0.0.0", port: int = 8080, enable_cloud: bool = True):
