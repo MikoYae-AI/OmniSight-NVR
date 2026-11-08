@@ -34,6 +34,7 @@ except (ImportError, ValueError):
 
 STATIC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "static"))
 SNAPSHOTS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "snapshots"))
+DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data"))
 
 config_manager = ConfigManager()
 stream_manager = StreamManager(config_manager)
@@ -139,14 +140,39 @@ class OmniSightHandler(BaseHTTPRequestHandler):
             return None
         return config_manager.validate_session(token)
 
-    def do_GET(self):
+    def _normalize_path(self) -> Optional[urllib.parse.ParseResult]:
+        """Normalizes /OmniSight-NVR/* directory paths to root so the hub works both at / and /OmniSight-NVR/."""
         parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+        if path in ("/OmniSight-NVR", "/omnisight-nvr"):
+            qs = f"?{parsed.query}" if parsed.query else ""
+            self.send_response(301)
+            self.send_header("Location", f"{path}/{qs}")
+            self.send_cors_headers()
+            self.end_headers()
+            return None
+        for prefix in ("/OmniSight-NVR/", "/omnisight-nvr/"):
+            if path.startswith(prefix):
+                stripped = "/" + path[len(prefix):]
+                self.path = stripped + (f"?{parsed.query}" if parsed.query else "")
+                return urllib.parse.urlparse(self.path)
+        return parsed
+
+    def do_GET(self):
+        parsed = self._normalize_path()
+        if parsed is None:
+            return
         path = parsed.path
         query = urllib.parse.parse_qs(parsed.query)
 
         # Static root
         if path == "/" or path == "/index.html":
             self.serve_file(os.path.join(STATIC_DIR, "index.html"), "text/html")
+            return
+
+        # Active tunnel & directory metadata JSON
+        if path == "/data/active_tunnel.json":
+            self.serve_file(os.path.join(DATA_DIR, "active_tunnel.json"), "application/json")
             return
 
         # Static assets
@@ -330,7 +356,7 @@ class OmniSightHandler(BaseHTTPRequestHandler):
                     "ip": query.get("ip", ["192.168.1.13"])[0],
                     "port": int(query.get("port", ["554"])[0] or 554),
                     "username": query.get("username", ["admin"])[0],
-                    "password": query.get("password", [""])[0],
+                    "password": query.get("password", ["Hik@1234"])[0],
                     "vendor": query.get("vendor", ["hikvision"])[0],
                     "channel": int(query.get("channel", ["1"])[0] or 1),
                 }
@@ -344,10 +370,33 @@ class OmniSightHandler(BaseHTTPRequestHandler):
             if "/ie-proxy/" in path:
                 sub_path = "/" + path.split("/ie-proxy/", 1)[1]
                 if parsed.query:
-                    sub_path += "?" + parsed.query
+                    # Strip internal token param before forwarding to camera
+                    clean_qs = "&".join(p for p in parsed.query.split("&") if not p.startswith("token="))
+                    if clean_qs:
+                        sub_path += "?" + clean_qs
                 self.proxy_camera_http(cam, sub_path)
                 return
             self.serve_ie_portal(cam, query)
+            return
+
+        # Camera Root Fallback Proxy for Native IE Web UI (/doc/*, /ISAPI/*, /SDK/*, /codebase/*)
+        # Allows the camera's built-in IE web interface (preview.asp, login.asp, websdk.js) to work
+        # seamlessly over Tailscale (hp250.tailccebcc.ts.net) and remote tunnels!
+        if path.startswith(("/doc/", "/ISAPI/", "/SDK/", "/PSIA/", "/codebase/")) or path == "/WebComponents.exe":
+            cam = config_manager.get_camera("cam-hikvision-13")
+            if not cam:
+                all_cams = config_manager.get_all_cameras()
+                cam = next((c for c in all_cams if not c.get("is_simulated") and c.get("ip")), None) or {
+                    "id": "cam-hikvision-13",
+                    "ip": "192.168.1.13",
+                    "username": "admin",
+                    "password": "Hik@1234",
+                }
+            if path.endswith("/WebComponents.exe"):
+                self.serve_camera_ie_plugin(cam)
+                return
+            sub_path = path + (f"?{parsed.query}" if parsed.query else "")
+            self.proxy_camera_http(cam, sub_path)
             return
 
         # Public or Authenticated API: Camera Stream, Snapshot & Status (so Edge IE Mode / direct links work seamlessly)
@@ -380,7 +429,10 @@ class OmniSightHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "image/jpeg")
             self.send_header("Content-Length", str(len(frame)))
-            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            # Allow short in-memory reuse for identical timestamped URLs so preload -> img.src
+            # does not trigger a second 170KB download over Cloudflare tunnels!
+            has_cache_buster = "_t" in query or "t" in query
+            self.send_header("Cache-Control", "private, max-age=5" if has_cache_buster else "no-cache")
             self.send_cors_headers()
             self.send_header("X-Camera-Status", live["status"])
             self.send_header("X-Camera-Online", "true" if live["online"] else "false")
@@ -493,7 +545,9 @@ class OmniSightHandler(BaseHTTPRequestHandler):
         self.send_json({"error": "Endpoint not found"}, 404)
 
     def do_POST(self):
-        parsed = urllib.parse.urlparse(self.path)
+        parsed = self._normalize_path()
+        if parsed is None:
+            return
         path = parsed.path
         body_data = self.read_json_body()
 
@@ -901,11 +955,50 @@ class OmniSightHandler(BaseHTTPRequestHandler):
             self.send_json({"error": "frame_base64 is required"}, 400)
             return
 
+        # Camera Root Fallback Proxy for Native IE Web UI (/ISAPI/*, /SDK/*)
+        if path.startswith(("/ISAPI/", "/SDK/", "/PSIA/")) or "/ie-proxy/" in path:
+            raw_body = self.read_raw_body()
+            ctype = self.headers.get("Content-Type", "application/xml")
+            cam = config_manager.get_camera("cam-hikvision-13") or {
+                "id": "cam-hikvision-13",
+                "ip": "192.168.1.13",
+                "username": "admin",
+                "password": "Hik@1234",
+            }
+            sub_path = "/" + path.split("/ie-proxy/", 1)[1] if "/ie-proxy/" in path else path
+            if parsed.query:
+                clean_qs = "&".join(p for p in parsed.query.split("&") if not p.startswith("token="))
+                if clean_qs:
+                    sub_path += "?" + clean_qs
+            self.proxy_camera_http(cam, sub_path, method="POST", body=raw_body, content_type=ctype)
+            return
+
         self.send_json({"error": "Endpoint not found"}, 404)
 
     def do_PUT(self):
-        parsed = urllib.parse.urlparse(self.path)
+        parsed = self._normalize_path()
+        if parsed is None:
+            return
         path = parsed.path
+
+        # Camera Root Fallback Proxy for Native IE Web UI PUT commands (/ISAPI/*, /SDK/*)
+        if path.startswith(("/ISAPI/", "/SDK/", "/PSIA/")) or "/ie-proxy/" in path:
+            raw_body = self.read_raw_body()
+            ctype = self.headers.get("Content-Type", "application/xml")
+            cam = config_manager.get_camera("cam-hikvision-13") or {
+                "id": "cam-hikvision-13",
+                "ip": "192.168.1.13",
+                "username": "admin",
+                "password": "Hik@1234",
+            }
+            sub_path = "/" + path.split("/ie-proxy/", 1)[1] if "/ie-proxy/" in path else path
+            if parsed.query:
+                clean_qs = "&".join(p for p in parsed.query.split("&") if not p.startswith("token="))
+                if clean_qs:
+                    sub_path += "?" + clean_qs
+            self.proxy_camera_http(cam, sub_path, method="PUT", body=raw_body, content_type=ctype)
+            return
+
         body_data = self.read_json_body()
 
         # Protect all PUT /api/* endpoints
@@ -927,7 +1020,9 @@ class OmniSightHandler(BaseHTTPRequestHandler):
         self.send_json({"error": "Endpoint not found"}, 404)
 
     def do_DELETE(self):
-        parsed = urllib.parse.urlparse(self.path)
+        parsed = self._normalize_path()
+        if parsed is None:
+            return
         path = parsed.path
 
         # Protect all DELETE /api/* endpoints
@@ -956,12 +1051,20 @@ class OmniSightHandler(BaseHTTPRequestHandler):
 
         self.send_json({"error": "Endpoint not found"}, 404)
 
-    def read_json_body(self) -> Dict[str, Any]:
+    def read_raw_body(self) -> Optional[bytes]:
         try:
             content_length = int(self.headers.get("Content-Length", 0))
             if content_length > 0:
-                body = self.rfile.read(content_length).decode("utf-8")
-                return json.loads(body)
+                return self.rfile.read(content_length)
+        except Exception:
+            pass
+        return None
+
+    def read_json_body(self) -> Dict[str, Any]:
+        try:
+            raw = self.read_raw_body()
+            if raw:
+                return json.loads(raw.decode("utf-8"))
         except Exception:
             pass
         return {}
@@ -1075,18 +1178,77 @@ class OmniSightHandler(BaseHTTPRequestHandler):
                 continue
         self.send_json({"error": f"ActiveX installer WebComponents.exe not found on {ip}"}, 404)
 
-    def proxy_camera_http(self, cam: Dict[str, Any], sub_path: str):
+    def proxy_camera_http(
+        self,
+        cam: Dict[str, Any],
+        sub_path: str,
+        method: str = "GET",
+        body: Optional[bytes] = None,
+        content_type: Optional[str] = None,
+    ):
         """Authenticated HTTP proxy to the camera's native web interface (ISAPI / doc / codebase)."""
+        import base64
+        cam_id = cam.get("id", "cam-hikvision-13")
         ip = (cam.get("ip") or "192.168.1.13").strip()
+        # Fast-path for High-Res ISAPI picture requests: if our RTSP 101 high-res engine already
+        # has a fresh 1920x1080 frame in memory, serve it in <1ms instead of waiting 3-9s on camera HTTP CGI!
+        if method == "GET" and "/picture" in sub_path.lower() and "direct=1" not in sub_path.lower():
+            session = stream_manager.get_session(cam_id)
+            if not session and ip:
+                for c in config_manager.get_all_cameras():
+                    if c.get("ip") == ip:
+                        session = stream_manager.get_session(c["id"])
+                        if session:
+                            break
+            if session and session.connection_status == "streaming" and session._latest_jpeg:
+                frame = session.get_latest_frame()
+                if frame and len(frame) > 15000:
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/jpeg")
+                    self.send_header("Content-Length", str(len(frame)))
+                    self.send_header("Cache-Control", "private, max-age=5")
+                    self.send_cors_headers()
+                    self.end_headers()
+                    self.wfile.write(frame)
+                    return
+
         username = cam.get("username") or "admin"
-        password = cam.get("password") or ""
+        password = cam.get("password") or "Hik@1234"
         opener = self._build_camera_opener(ip, 80, username, password)
         target_url = f"http://{ip}:80{sub_path}"
+        basic_b64 = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
+        headers = {
+            "User-Agent": "Mozilla/5.0 (compatible; MSIE 11.0; Windows NT 10.0; WOW64; Trident/7.0)",
+            "Authorization": f"Basic {basic_b64}",
+        }
+        if content_type:
+            headers["Content-Type"] = content_type
         try:
-            req = urllib.request.Request(target_url, headers={"User-Agent": "Mozilla/5.0 (compatible; MSIE 11.0; Windows NT 10.0; WOW64; Trident/7.0)"})
-            with opener.open(req, timeout=8.0) as resp:
+            req = urllib.request.Request(target_url, data=body, headers=headers, method=method)
+            with opener.open(req, timeout=15.0) as resp:
                 data = resp.read()
                 ctype = resp.headers.get("Content-Type", "application/octet-stream")
+                # Auto-inject sessionStorage userInfo into preview.asp so the camera's native IE web UI
+                # never redirects to login.asp and immediately authenticates WebSDK & WebComponents ActiveX,
+                # plus polyfills #plugin with live 1080p video in non-ActiveX browsers!
+                if sub_path.startswith("/doc/page/preview.asp") and b"<head>" in data:
+                    user_info_b64 = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
+                    inject_script = (
+                        f"<script>"
+                        f"try{{sessionStorage.setItem('userInfo','{user_info_b64}');"
+                        f"document.cookie='language=en; path=/';}}catch(e){{}}"
+                        f"if(!('ActiveXObject' in window)){{"
+                        f"window.addEventListener('load',function(){{setTimeout(function(){{"
+                        f"var p=document.getElementById('main_plugin')||document.getElementById('plugin');"
+                        f"if(p){{p.innerHTML='<img id=\"omnisightPolyfillImg\" style=\"width:100%;height:100%;object-fit:contain;background:#000;display:block;\" />';"
+                        f"var im=document.getElementById('omnisightPolyfillImg');"
+                        f"function tick(){{var pre=new Image();pre.onload=function(){{im.src=pre.src;setTimeout(tick,80);}};pre.onerror=function(){{setTimeout(tick,800);}};pre.src='/api/cameras/cam-hikvision-13/snapshot?_t='+new Date().getTime();}}"
+                        f"tick();}}"
+                        f"}},1200);}});"
+                        f"}}"
+                        f"</script>"
+                    ).encode("utf-8")
+                    data = data.replace(b"<head>", b"<head>" + inject_script, 1)
                 self.send_response(resp.status)
                 self.send_header("Content-Type", ctype)
                 self.send_header("Content-Length", str(len(data)))
@@ -1095,7 +1257,20 @@ class OmniSightHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(data)
         except urllib.error.HTTPError as e:
-            self.send_json({"error": f"Camera returned HTTP {e.code}", "url": target_url}, e.code)
+            err_body = b""
+            try:
+                err_body = e.read()
+            except Exception:
+                pass
+            if err_body:
+                self.send_response(e.code)
+                self.send_header("Content-Type", e.headers.get("Content-Type", "application/xml"))
+                self.send_header("Content-Length", str(len(err_body)))
+                self.send_cors_headers()
+                self.end_headers()
+                self.wfile.write(err_body)
+            else:
+                self.send_json({"error": f"Camera returned HTTP {e.code}", "url": target_url}, e.code)
         except Exception as e:
             self.send_json({"error": f"Camera proxy error: {e}", "url": target_url}, 502)
 
@@ -1125,24 +1300,24 @@ class OmniSightHandler(BaseHTTPRequestHandler):
 <head>
   <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
   <meta http-equiv="X-UA-Compatible" content="IE=edge,EmulateIE11" />
-  <title>{cam_name} — IE / ActiveX &amp; Universal Stream Portal</title>
+  <title>{cam_name} — OmniSight NVR · IE / ActiveX &amp; Universal Stream Portal</title>
   <style>
-    body {{ margin: 0; background: #0d0d11; color: #f5f5f7; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }}
-    .ie-bar {{ display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 14px; background: #16161d; border-bottom: 1px solid rgba(255,255,255,0.1); font-size: 12px; flex-wrap: wrap; }}
-    .ie-title {{ font-weight: 600; color: #fff; display: flex; align-items: center; gap: 8px; }}
-    .ie-badge {{ background: rgba(10, 132, 255, 0.18); color: #5ac8fa; border: 1px solid rgba(10, 132, 255, 0.4); padding: 2px 8px; border-radius: 6px; font-size: 11px; }}
+    body {{ margin: 0; background: #000000; color: #f5f5f7; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", "Segoe UI", sans-serif; display: flex; flex-direction: column; height: 100vh; overflow: hidden; -webkit-font-smoothing: antialiased; }}
+    .ie-bar {{ display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 18px; background: rgba(28, 28, 30, 0.82); -webkit-backdrop-filter: blur(28px) saturate(190%); backdrop-filter: blur(28px) saturate(190%); border-bottom: 1px solid rgba(255,255,255,0.12); font-size: 12px; flex-wrap: wrap; }}
+    .ie-title {{ font-weight: 600; color: #f5f5f7; display: flex; align-items: center; gap: 10px; letter-spacing: -0.01em; }}
+    .ie-badge {{ background: rgba(10, 132, 255, 0.16); color: #64d2ff; border: 1px solid rgba(10, 132, 255, 0.38); padding: 3px 9px; border-radius: 980px; font-size: 11px; font-weight: 600; }}
     .ie-actions {{ display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }}
-    .ie-btn {{ background: rgba(255,255,255,0.08); color: #f5f5f7; border: 1px solid rgba(255,255,255,0.16); padding: 5px 10px; border-radius: 6px; font-size: 11px; cursor: pointer; text-decoration: none; }}
-    .ie-btn:hover, .ie-btn.active {{ background: #0a84ff; border-color: #0a84ff; color: #fff; }}
-    .ie-stage {{ flex: 1; position: relative; display: flex; align-items: center; justify-content: center; background: #000; overflow: hidden; }}
+    .ie-btn {{ background: rgba(255,255,255,0.08); color: #f5f5f7; border: 1px solid rgba(255,255,255,0.14); padding: 6px 12px; border-radius: 980px; font-size: 11px; font-weight: 500; cursor: pointer; text-decoration: none; transition: all 0.18s ease; }}
+    .ie-btn:hover, .ie-btn.active {{ background: #0a84ff; border-color: #0a84ff; color: #ffffff; box-shadow: 0 2px 10px rgba(10, 132, 255, 0.35); }}
+    .ie-stage {{ flex: 1; position: relative; display: flex; align-items: center; justify-content: center; background: #000000; overflow: hidden; }}
     .ie-stage img {{ width: 100%; height: 100%; object-fit: contain; }}
-    .ie-status {{ position: absolute; bottom: 10px; left: 12px; background: rgba(0,0,0,0.72); border: 1px solid rgba(255,255,255,0.15); padding: 4px 10px; border-radius: 6px; font-size: 11px; font-family: monospace; color: #34c759; pointer-events: none; }}
+    .ie-status {{ position: absolute; bottom: 14px; left: 16px; background: rgba(28, 28, 30, 0.78); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.14); padding: 6px 12px; border-radius: 980px; font-size: 11px; font-family: "SF Mono", Menlo, Consolas, monospace; color: #30d158; pointer-events: none; }}
   </style>
 </head>
 <body>
   <div class="ie-bar">
     <div class="ie-title">
-      <span>🌐 {cam_name} ({ip})</span>
+      <span> {cam_name} ({ip})</span>
       <span class="ie-badge" id="engineBadge">Engine: Auto</span>
     </div>
     <div class="ie-actions">
@@ -1171,12 +1346,15 @@ class OmniSightHandler(BaseHTTPRequestHandler):
     var ISAPI_SNAP_URL = "{isapi_snap_url}";
     var INITIAL_MODE = "{initial_mode}";
     var pollTimer = null;
+    var engineEpoch = 0;
 
     function isIEOrActiveXSupported() {{
       return ("ActiveXObject" in window) || /MSIE|Trident/i.test(navigator.userAgent);
     }}
 
     function switchEngine(mode) {{
+      engineEpoch += 1;
+      var myEpoch = engineEpoch;
       if (pollTimer) {{ clearTimeout(pollTimer); pollTimer = null; }}
       var pluginHost = document.getElementById("pluginHost");
       var webUiFrame = document.getElementById("webUiFrame");
@@ -1190,12 +1368,17 @@ class OmniSightHandler(BaseHTTPRequestHandler):
 
       if (mode === "webui") {{
         liveImg.style.display = "none";
+        liveImg.removeAttribute("src");
         pluginHost.style.display = "none";
         pluginHost.innerHTML = "";
         webUiFrame.style.display = "block";
-        webUiFrame.src = "http://" + CAM_IP + "/doc/page/preview.asp";
-        badge.innerHTML = "Camera Native IE Web UI";
-        hud.innerHTML = "Loaded http://" + CAM_IP + "/doc/page/preview.asp (enable Edge IE Mode for ActiveX)";
+        try {{
+          sessionStorage.setItem("userInfo", BASIC_AUTH);
+          document.cookie = "language=en; path=/";
+        }} catch (e) {{}}
+        webUiFrame.src = "/doc/page/preview.asp";
+        badge.innerHTML = "Camera Native IE Web UI (Proxied)";
+        hud.innerHTML = "Loaded native camera IE UI via Hub proxy (/doc/page/preview.asp) — Live 1080p Active";
         return;
       }}
 
@@ -1204,23 +1387,24 @@ class OmniSightHandler(BaseHTTPRequestHandler):
 
       if (mode === "activex") {{
         liveImg.style.display = "none";
+        liveImg.removeAttribute("src");
         pluginHost.style.display = "block";
         badge.innerHTML = "IE ActiveX (clsid:E7EF736D)";
         pluginHost.innerHTML = "<object classid='clsid:E7EF736D-B4E6-4A5A-BA94-732D71107808' codebase='{plugin_dl_url}' standby='Loading Hikvision WebComponents ActiveX...' id='PreviewActiveX' width='100%' height='100%' name='ocx'><param name='wndtype' value='1'><param name='playmode' value='normal'><param name='needborder' value='1'></object>";
         setTimeout(function() {{
+          if (myEpoch !== engineEpoch) return;
           var ocx = document.getElementById("PreviewActiveX");
           if (ocx && typeof ocx.HWP_Play !== "undefined") {{
             var rc = ocx.HWP_Play(RTSP_MAIN, PLUGIN_AUTH, 0, "", "");
             hud.innerHTML = rc === 0 ? "ActiveX HWP_Play Connected (" + RTSP_MAIN + ")" : "ActiveX HWP_Play rc=" + rc + " (trying sub-stream)";
             if (rc !== 0) ocx.HWP_Play(RTSP_SUB, PLUGIN_AUTH, 0, "", "");
           }} else {{
-            hud.innerHTML = "ActiveX control not loaded in this browser — auto-engaging Live Stream fallback (use Edge IE Mode + WebComponents.exe for native ActiveX).";
+            hud.innerHTML = "ActiveX control not loaded in this browser — auto-engaging 1080p High-Res Stream fallback.";
             if (!isIEOrActiveXSupported()) {{
               setTimeout(function() {{
-                pluginHost.style.display = "none";
-                liveImg.style.display = "block";
-                liveImg.src = STREAM_URL + "&_t=" + new Date().getTime();
-              }}, 900);
+                if (myEpoch !== engineEpoch) return;
+                switchEngine("snapshot");
+              }}, 700);
             }}
           }}
         }}, 400);
@@ -1229,30 +1413,46 @@ class OmniSightHandler(BaseHTTPRequestHandler):
 
       pluginHost.style.display = "none";
       pluginHost.innerHTML = "";
+      liveImg.onerror = null;
       liveImg.style.display = "block";
 
       var isTunnel = location.hostname.indexOf("trycloudflare.com") !== -1 || location.hostname.indexOf("github.io") !== -1;
+      var targetSnap = mode === "snapshot" ? ISAPI_SNAP_URL : SNAP_URL;
+
+      function pullNext() {{
+        if (myEpoch !== engineEpoch) return;
+        var pre = new Image();
+        pre.onload = function() {{
+          if (myEpoch !== engineEpoch) return;
+          liveImg.src = pre.src;
+          if (pre.naturalWidth && pre.naturalHeight) {{
+            hud.innerHTML = "Live High-Res Stream: " + pre.naturalWidth + "×" + pre.naturalHeight + " Full HD • 24/7 Active";
+          }}
+          pollTimer = setTimeout(pullNext, mode === "snapshot" ? 75 : 55);
+        }};
+        pre.onerror = function() {{
+          if (myEpoch !== engineEpoch) return;
+          pollTimer = setTimeout(pullNext, 600);
+        }};
+        pre.src = targetSnap + "&_t=" + new Date().getTime();
+      }}
+
       if (mode === "mjpeg" && !isTunnel) {{
-        badge.innerHTML = "Multipart MJPEG Stream (30 FPS)";
-        hud.innerHTML = "Streaming live MJPEG via OmniSight Hub";
+        badge.innerHTML = "High-Res MJPEG Stream (1080p)";
+        hud.innerHTML = "Streaming live 1920×1080 MJPEG via OmniSight Hub";
+        liveImg.onerror = function() {{
+          if (myEpoch !== engineEpoch) return;
+          liveImg.onerror = null;
+          pullNext();
+        }};
         liveImg.src = STREAM_URL + "&_t=" + new Date().getTime();
         return;
       }}
 
-      var targetSnap = mode === "snapshot" ? ISAPI_SNAP_URL : SNAP_URL;
-      badge.innerHTML = mode === "snapshot" ? "ISAPI Direct 1080p Polling" : "Zero-Buffer Frame Stream";
-      hud.innerHTML = mode === "snapshot" ? "Polling high-res 1920x1080 ISAPI JPEG directly from camera" : "Streaming continuous frames via OmniSight Hub";
-      function pullNext() {{
-        var pre = new Image();
-        pre.onload = function() {{
-          liveImg.src = pre.src;
-          pollTimer = setTimeout(pullNext, mode === "snapshot" ? 200 : 55);
-        }};
-        pre.onerror = function() {{
-          pollTimer = setTimeout(pullNext, 800);
-        }};
-        pre.src = targetSnap + "&_t=" + new Date().getTime();
-      }}
+      // Reset any active multipart MJPEG connection before starting high-res frame loop
+      liveImg.removeAttribute("src");
+      badge.innerHTML = mode === "snapshot" ? "High-Res 1080p ISAPI (1920×1080)" : "High-Res 1080p Stream";
+      hud.innerHTML = "Connecting to 1920×1080 Full HD stream...";
       pullNext();
     }}
 

@@ -2,14 +2,15 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,EmulateIE11">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="theme-color" content="#0b120e">
+  <meta name="theme-color" content="#000000">
   <meta name="description" content="OmniSight is a local-first surveillance dashboard for bringing IP cameras and DVRs into one clear, private view.">
   <title>OmniSight NVR — Every angle, in view</title>
-  <link rel="stylesheet" href="./static/css/style.css?v=2.3.0">
-  <link rel="stylesheet" href="./static/css/refined.css?v=2.3.0">
+  <link rel="stylesheet" href="./static/css/style.css?v=2.4.0">
+  <link rel="stylesheet" href="./static/css/refined.css?v=2.4.0">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js" defer></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js" defer></script>
@@ -103,9 +104,15 @@
     <!-- Editorial dashboard hero / status overview -->
     <section class="dashboard-hero" aria-labelledby="dashboardTitle">
       <div class="hero-copy">
-        <p class="hero-kicker"><span class="hero-kicker-mark" aria-hidden="true"></span> PRIVATE VIDEO SYSTEM <span class="hero-kicker-divider">/</span> LIVE MATRIX</p>
+        <p class="hero-kicker"><span class="hero-kicker-mark" aria-hidden="true"></span>  OMNISIGHT DIRECTORY <span class="hero-kicker-divider">/</span> 24/7 HIGH-RES 1080P SENTRY</p>
         <h2 id="dashboardTitle">Every angle, <em>in view.</em></h2>
-        <p class="hero-description">A quieter command center for the cameras that watch over your space.</p>
+        <p class="hero-description">Engineered for continuous 24/7 1080p High-Res surveillance across Tailscale MagicDNS, Cloudflare Edge, and native Internet Explorer / ActiveX.</p>
+        <div class="apple-directory-bar" aria-label="OmniSight NVR Directory">
+          <a class="dir-pill dir-pill-tailscale" id="heroTailscaleDirLink" href="http://hp250.tailccebcc.ts.net:8080/OmniSight-NVR/" target="_blank" rel="noopener" title="Open OmniSight-NVR Directory on Tailscale MagicDNS">🌐 hp250.tailccebcc.ts.net/OmniSight-NVR/</a>
+          <button type="button" class="dir-pill dir-pill-ie" onclick="if(typeof openCameraIePortal==='function'){openCameraIePortal('cam-hikvision-13');}else{window.location.href='/api/cameras/cam-hikvision-13/ie-portal';}" title="Launch Internet Explorer / Edge IE Mode & WebComponents ActiveX Portal">🪟 IE / ActiveX Portal</button>
+          <a class="dir-pill" href="/api/cameras/cam-hikvision-13/ie-plugin" download="WebComponents.exe" title="Download official Hikvision WebComponents.exe ActiveX installer">⬇ WebComponents.exe</a>
+          <span class="dir-pill dir-pill-24x7" title="24/7 Continuous Full HD 1920x1080 Hardware Monitoring Active">🟢 24/7 1080p High-Res Active</span>
+        </div>
       </div>
       <aside class="hero-aside" aria-label="Dashboard summary">
         <div class="hero-mode-row">
@@ -1386,6 +1393,20 @@
     </div>
   </div>
 
-  <script src="./static/js/app.js?v=2.3.0"></script>
+  <script>
+    // ES5 Internet Explorer 11 / ActiveX Direct Bootstrapper
+    (function() {
+      var ua = window.navigator ? (window.navigator.userAgent || "") : "";
+      if (/MSIE |Trident\//i.test(ua) && window.location.pathname.indexOf("ie-portal") === -1) {
+        window.setTimeout(function() {
+          var grid = document.getElementById("cameraGrid");
+          if (grid && !grid.children.length) {
+            grid.innerHTML = '<iframe src="/api/cameras/cam-hikvision-13/ie-portal?mode=activex" style="width:100%;height:78vh;border:0;border-radius:16px;background:#000;"></iframe>';
+          }
+        }, 1200);
+      }
+    })();
+  </script>
+  <script src="./static/js/app.js?v=2.4.0"></script>
 </body>
 </html>

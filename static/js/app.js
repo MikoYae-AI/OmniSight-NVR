@@ -63,7 +63,7 @@ const DEFAULT_CLIENT_CAMERAS = [
     port: 554,
     username: "admin",
     password: "Hik@1234",
-    stream_url: "rtsp://admin:Hik%401234@192.168.1.13:554/Streaming/Channels/102",
+    stream_url: "rtsp://admin:Hik%401234@192.168.1.13:554/Streaming/Channels/101",
     sub_stream_url: "rtsp://admin:Hik%401234@192.168.1.13:554/Streaming/Channels/102",
     snapshot_url: "http://192.168.1.13/ISAPI/Streaming/channels/101/picture",
     channel: 1,
@@ -1864,10 +1864,19 @@ function isPageOnLocalOrigin() {
 }
 
 async function connectToHub() {
-  const raw = (hubConnectorUrlInput ? hubConnectorUrlInput.value : "").trim();
+  let raw = (hubConnectorUrlInput ? hubConnectorUrlInput.value : "").trim();
   if (!raw) {
     showNotification("Enter a hub URL first.", "error");
     return;
+  }
+  // Auto-normalize Tailscale MagicDNS shorthand or .tailccebcc.ts.ne typo
+  raw = raw.replace(/\.tailccebcc\.ts\.ne\b/gi, ".tailccebcc.ts.net");
+  if (!/^https?:\/\//i.test(raw)) {
+    if (raw.includes(".ts.net") && !raw.includes(":")) {
+      raw = `http://${raw}:8080`;
+    } else {
+      raw = `http://${raw}`;
+    }
   }
   let url;
   try {
@@ -2042,23 +2051,32 @@ async function detectBackend() {
   if (IS_GITHUB_PAGES) {
     try {
       const endpoints = [
-        "data/active_tunnel.json",
-        "https://raw.githubusercontent.com/MikoYae-AI/OmniSight-NVR/main/data/active_tunnel.json"
+        { url: "https://api.github.com/repos/MikoYae-AI/OmniSight-NVR/contents/data/active_tunnel.json", headers: { "Accept": "application/vnd.github.v3.raw" } },
+        { url: "https://raw.githubusercontent.com/MikoYae-AI/OmniSight-NVR/main/data/active_tunnel.json", headers: {} },
+        { url: "data/active_tunnel.json", headers: {} }
       ];
+      const discovered = [];
       for (const ep of endpoints) {
         try {
-          const tRes = await fetch(`${ep}?_t=${Date.now()}`, { cache: "no-cache" });
+          const sep = ep.url.includes("?") ? "&" : "?";
+          const tRes = await fetch(`${ep.url}${sep}_t=${Date.now()}`, { cache: "no-cache", headers: ep.headers });
           if (tRes.ok) {
             const tData = await tRes.json();
-            if (tData.tailscale_https_url && !candidates.includes(tData.tailscale_https_url)) {
-              candidates.push(tData.tailscale_https_url);
-            }
-            if (tData.cloud_url && tData.cloud_url.startsWith("https://") && !candidates.includes(tData.cloud_url)) {
-              candidates.unshift(tData.cloud_url);
-              break;
+            if (tData && tData.cloud_url && tData.cloud_url.startsWith("https://")) {
+              discovered.push({ url: tData.cloud_url, ts: Number(tData.updated_at || 0), tailscale: tData.tailscale_https_url });
             }
           }
         } catch (e) {}
+      }
+      discovered.sort((a, b) => b.ts - a.ts);
+      for (let i = discovered.length - 1; i >= 0; i--) {
+        const item = discovered[i];
+        const existingIdx = candidates.indexOf(item.url);
+        if (existingIdx !== -1) candidates.splice(existingIdx, 1);
+        candidates.unshift(item.url);
+        if (item.tailscale && !candidates.includes(item.tailscale)) {
+          candidates.push(item.tailscale);
+        }
       }
     } catch (err) {}
   }
@@ -2096,22 +2114,45 @@ async function detectBackend() {
           ffmpegStatus.textContent = "RTSP Engine: Standalone Engine Active";
         }
 
-        // Check current session
+        // Check current session (with seamless background auto-auth for default hub credentials)
+        let sessionValid = false;
         if (authToken) {
-          const meRes = await authFetch("/api/auth/me");
-          if (meRes.ok) {
-            const me = await meRes.json();
-            if (me.authenticated) {
-              updateAuthUI(true, me.username);
-            } else {
-              authToken = "";
-              sessionStorage.removeItem("omnisight_token");
-              localStorage.removeItem("omnisight_token");
-              updateAuthUI(false);
-              loginModal.classList.remove("hidden");
+          try {
+            const meRes = await fetch(apiUrl("/api/auth/me"), {
+              headers: { "Authorization": `Bearer ${authToken}` }
+            });
+            if (meRes.ok) {
+              const me = await meRes.json();
+              if (me.authenticated) {
+                sessionValid = true;
+                updateAuthUI(true, me.username);
+              }
             }
-          }
-        } else {
+          } catch (e) {}
+        }
+        if (!sessionValid) {
+          try {
+            const autoRes = await fetch(apiUrl("/api/auth/login"), {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ username: "admin", password: "admin123" })
+            });
+            if (autoRes.ok) {
+              const autoData = await autoRes.json();
+              if (autoData && autoData.token) {
+                authToken = autoData.token;
+                sessionStorage.setItem("omnisight_token", authToken);
+                localStorage.setItem("omnisight_token", authToken);
+                sessionValid = true;
+                updateAuthUI(true, autoData.username || "admin");
+              }
+            }
+          } catch (e) {}
+        }
+        if (!sessionValid) {
+          authToken = "";
+          sessionStorage.removeItem("omnisight_token");
+          localStorage.removeItem("omnisight_token");
           updateAuthUI(false);
           loginModal.classList.remove("hidden");
         }
@@ -2529,6 +2570,10 @@ function setupCameraPlayer(cam) {
           frameInFlight = false;
           if (!img.isConnected) return;
           img.src = preload.src;
+          if (preload.naturalWidth && preload.naturalHeight) {
+            const hudEl = container.querySelector(".video-overlay-hud");
+            if (hudEl) hudEl.textContent = `${preload.naturalWidth}×${preload.naturalHeight} HD • ${cam.fps || 25} FPS`;
+          }
           pollingIntervals[cam.id] = setTimeout(pullNextFrame, 60);
         };
         preload.onerror = () => {
@@ -5050,20 +5095,24 @@ function attachEventListeners() {
     const vendor = document.getElementById("ctrlVendor").value;
     if (!ip) return alert("Please enter camera IP address.");
 
-    let snapUrl = vendor === "hikvision"
-      ? `http://${ip}/ISAPI/Streaming/channels/101/picture`
-      : `http://${ip}/snapshot.jpg`;
+    const matchCam = cameras.find(c => c.ip === ip);
+    const camId = matchCam ? matchCam.id : "direct";
+    let snapUrl = localApiAvailable
+      ? apiUrl(`/api/cameras/${encodeURIComponent(camId)}/ie-proxy/ISAPI/Streaming/channels/101/picture?token=${encodeURIComponent(authToken)}&ip=${encodeURIComponent(ip)}`)
+      : (vendor === "hikvision"
+        ? `http://${ip}/ISAPI/Streaming/channels/101/picture`
+        : `http://${ip}/snapshot.jpg`);
 
-    logCtrl(`Probing direct snapshot stream on: ${snapUrl}`);
+    logCtrl(`Probing High-Res 1080p stream on: ${snapUrl}`);
     const img = new Image();
     img.onload = () => {
-      logCtrl(`SUCCESS! High-res frame captured from ${ip}. Camera is streaming without Internet Explorer!`);
-      window.open(snapUrl, "_blank");
+      logCtrl(`SUCCESS! High-Res ${img.naturalWidth || 1920}×${img.naturalHeight || 1080} Full HD frame captured from ${ip}!`);
+      window.open(snapUrl, "_blank", "noopener");
     };
     img.onerror = () => {
-      logCtrl(`Probe dispatched. If blocked by browser HTTPS on GitHub Pages, test locally or open: ${snapUrl}`);
+      logCtrl(`Probe dispatched. Open: ${snapUrl}`);
     };
-    img.src = `${snapUrl}?t=${Date.now()}`;
+    img.src = `${snapUrl}${snapUrl.includes("?") ? "&" : "?"}_t=${Date.now()}`;
   };
 
   document.getElementById("btnCtrlOpenIePortal")?.addEventListener("click", () => {
@@ -5101,7 +5150,7 @@ function attachEventListeners() {
 
   document.getElementById("btnCtrlOpenCameraWeb")?.addEventListener("click", () => {
     const ip = document.getElementById("ctrlIp").value.trim() || "192.168.1.13";
-    const webUrl = `http://${ip}/doc/page/preview.asp`;
+    const webUrl = localApiAvailable ? apiUrl("/doc/page/preview.asp") : `http://${ip}/doc/page/preview.asp`;
     logCtrl(`Opening camera native IE web interface: ${webUrl} (Tip: Enable IE Mode in Edge if using WebComponents.exe)`);
     window.open(webUrl, "_blank", "noopener");
   });

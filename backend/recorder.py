@@ -6,6 +6,7 @@ Handles saving stills, managing disk retention, and recording triggers.
 import os
 import time
 import glob
+import threading
 from typing import List, Dict, Any, Optional
 
 DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data"))
@@ -17,11 +18,66 @@ os.makedirs(RECORDINGS_DIR, exist_ok=True)
 
 
 class RecorderManager:
-    """Manages captured surveillance artifacts."""
+    """Manages captured surveillance artifacts and 24/7 continuous ring-buffer frame archiving."""
 
-    def __init__(self, stream_manager):
+    def __init__(self, stream_manager, retention_hours: int = 24, interval_seconds: float = 30.0):
         self.stream_manager = stream_manager
+        self.retention_hours = retention_hours
+        self.interval_seconds = interval_seconds
         self.active_recordings: Dict[str, Dict[str, Any]] = {}
+        self._running = True
+        self._worker = threading.Thread(target=self._continuous_archive_loop, daemon=True, name="OmniSight-24x7-Recorder")
+        self._worker.start()
+
+    def _continuous_archive_loop(self):
+        """Continuously archives frames from online physical cameras 24/7 with automatic retention pruning."""
+        last_prune = 0.0
+        while self._running:
+            try:
+                now = time.time()
+                date_dir = time.strftime("%Y-%m-%d", time.localtime(now))
+                sec_of_day = int(now - time.mktime(time.localtime(now)[:3] + (0, 0, 0, 0, 0, -1)))
+
+                sessions = getattr(self.stream_manager, "sessions", {})
+                for cam_id, session in list(sessions.items()):
+                    if not session or getattr(session, "is_simulated", False):
+                        continue
+                    status = session.get_status()
+                    if not status.get("online"):
+                        continue
+                    with session._lock:
+                        frame = session._latest_jpeg
+                    if not frame or len(frame) < 500:
+                        continue
+
+                    cam_rec_dir = os.path.join(RECORDINGS_DIR, cam_id, date_dir)
+                    os.makedirs(cam_rec_dir, exist_ok=True)
+                    filepath = os.path.join(cam_rec_dir, f"frame_{sec_of_day:05d}.jpg")
+                    with open(filepath, "wb") as f:
+                        f.write(frame)
+                    self.active_recordings[cam_id] = {
+                        "last_archived_at": int(now),
+                        "date": date_dir,
+                        "sec_of_day": sec_of_day,
+                        "size_bytes": len(frame),
+                    }
+
+                # Prune archives older than retention window every 15 minutes
+                if now - last_prune > 900:
+                    last_prune = now
+                    cutoff = now - (self.retention_hours * 3600)
+                    for root, _dirs, files in os.walk(RECORDINGS_DIR):
+                        for fname in files:
+                            if fname.endswith(".jpg"):
+                                fpath = os.path.join(root, fname)
+                                try:
+                                    if os.path.getmtime(fpath) < cutoff:
+                                        os.remove(fpath)
+                                except Exception:
+                                    pass
+            except Exception:
+                pass
+            time.sleep(self.interval_seconds)
 
     def capture_snapshot(self, camera_id: str, camera_name: str = "") -> Optional[Dict[str, Any]]:
         """Takes a high-res snapshot of the given camera feed and stores it on disk."""
@@ -155,8 +211,27 @@ class RecorderManager:
         events.sort(key=lambda x: x["start_time"])
         return events
 
-    def get_playback_frame(self, camera_id: str, timestamp_or_seconds: float) -> Optional[bytes]:
-        """Fetches or reconstructs historical surveillance frame at specified time."""
+    def get_playback_frame(self, camera_id: str, timestamp_or_seconds: float, date_str: str = "") -> Optional[bytes]:
+        """Fetches real archived 24/7 frame nearest to the requested time of day, or reconstructs if none exists yet."""
+        if not date_str:
+            date_str = time.strftime("%Y-%m-%d")
+        cam_rec_dir = os.path.join(RECORDINGS_DIR, camera_id, date_str)
+        if os.path.isdir(cam_rec_dir):
+            try:
+                target_sec = int(float(timestamp_or_seconds)) % 86400
+                files = glob.glob(os.path.join(cam_rec_dir, "frame_*.jpg"))
+                if files:
+                    best_file = min(
+                        files,
+                        key=lambda p: abs(int(os.path.basename(p).replace("frame_", "").replace(".jpg", "")) - target_sec)
+                    )
+                    with open(best_file, "rb") as f:
+                        data = f.read()
+                    if data and len(data) > 200:
+                        return data
+            except Exception:
+                pass
+
         session = self.stream_manager.get_session(camera_id)
         if session and hasattr(session, "generate_playback_frame"):
             return session.generate_playback_frame(timestamp_or_seconds)

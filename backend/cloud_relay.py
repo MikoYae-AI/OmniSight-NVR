@@ -132,9 +132,9 @@ class CloudRelayManager:
         print(f"  ✦ Hosted Web Link     : \033[1;32m{hosted_link}\033[0m")
         print(f"  ✦ Local Network (LAN) : http://{self.local_ip}:{self.port}")
         if self.tailscale_dns:
-            print(f"  ✦ Tailscale MagicDNS  : \033[1;35mhttp://{self.tailscale_dns}:{self.port}\033[0m")
+            print(f"  ✦ Tailscale MagicDNS  : \033[1;35mhttp://{self.tailscale_dns}:{self.port}/OmniSight-NVR/\033[0m")
         if self.tailscale_ip:
-            print(f"  ✦ Tailscale Mesh IP   : http://{self.tailscale_ip}:{self.port}")
+            print(f"  ✦ Tailscale Mesh IP   : http://{self.tailscale_ip}:{self.port}/OmniSight-NVR/")
         print("═" * 68)
         print("  ✦ Scan with iPhone/Android Camera to View on 4G Cellular:")
 
@@ -153,11 +153,13 @@ class CloudRelayManager:
             repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             tunnel_json_path = os.path.join(repo_root, "data", "active_tunnel.json")
             os.makedirs(os.path.dirname(tunnel_json_path), exist_ok=True)
+            ts_dns = self.tailscale_dns or "hp250.tailccebcc.ts.net"
             meta = {
                 "cloud_url": url,
-                "tailscale_dns": self.tailscale_dns or "hp250.tailccebcc.ts.net",
-                "tailscale_url": f"http://{self.tailscale_dns or 'hp250.tailccebcc.ts.net'}:{self.port}",
-                "tailscale_https_url": f"https://{self.tailscale_dns or 'hp250.tailccebcc.ts.net'}",
+                "tailscale_dns": ts_dns,
+                "tailscale_url": f"http://{ts_dns}:{self.port}",
+                "directory_url": f"http://{ts_dns}:{self.port}/OmniSight-NVR/",
+                "tailscale_https_url": f"https://{ts_dns}",
                 "updated_at": int(time.time()),
             }
             with open(tunnel_json_path, "w", encoding="utf-8") as f:
@@ -214,49 +216,53 @@ class CloudRelayManager:
                 f"http://127.0.0.1:{self.port}",
                 "--no-autoupdate",
             ]
-            try:
-                self.process = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1,
-                )
-                start_time = time.time()
-                while not self._stop_event.is_set():
-                    line = self.process.stdout.readline()
-                    if not line:
-                        if self.process.poll() is not None:
+            while not self._stop_event.is_set():
+                self.status = "connecting"
+                self.cloud_url = None
+                try:
+                    self.process = subprocess.Popen(
+                        cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        bufsize=1,
+                    )
+                    start_time = time.time()
+                    while not self._stop_event.is_set():
+                        line = self.process.stdout.readline()
+                        if not line:
+                            if self.process.poll() is not None:
+                                break
+                            continue
+
+                        # Search for public trycloudflare URL
+                        if not self.cloud_url:
+                            m = re.search(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com", line)
+                            if m and m.group(0) != "https://api.trycloudflare.com":
+                                self.cloud_url = m.group(0)
+                                self.status = "connected"
+                                self.error_msg = None
+                                hosted_link = f"https://mikoyae-ai.github.io/OmniSight-NVR/?hub={self.cloud_url}"
+                                self._generate_qr(hosted_link)
+                                self._print_banner(self.cloud_url)
+                                self._sync_active_tunnel_meta(self.cloud_url)
+
+                        # Timeout safety: if 45s elapsed with no URL found, restart cloudflared
+                        if not self.cloud_url and (time.time() - start_time > 45):
+                            self.error_msg = "Timeout waiting for Cloudflare tunnel assignment — retrying"
                             break
-                        continue
 
-                    # Search for public trycloudflare URL
-                    if not self.cloud_url:
-                        m = re.search(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com", line)
-                        if m and m.group(0) != "https://api.trycloudflare.com":
-                            self.cloud_url = m.group(0)
-                            self.status = "connected"
-                            hosted_link = f"https://mikoyae-ai.github.io/OmniSight-NVR/?hub={self.cloud_url}"
-                            self._generate_qr(hosted_link)
-                            self._print_banner(self.cloud_url)
-                            self._sync_active_tunnel_meta(self.cloud_url)
+                    if self.process and self.process.poll() is None:
+                        self.process.terminate()
+                        self.process.wait(timeout=3)
+                except Exception as e:
+                    self.status = "error"
+                    self.error_msg = str(e)
+                    print(f"[CloudRelay] Process error: {e}")
 
-                    # Timeout safety: if 30s elapsed with no URL found
-                    if not self.cloud_url and (time.time() - start_time > 30):
-                        self.status = "error"
-                        self.error_msg = "Timeout waiting for Cloudflare tunnel assignment"
-                        break
-
-                if self.process and self.process.poll() is None:
-                    self.process.terminate()
-                    self.process.wait(timeout=3)
-            except Exception as e:
-                self.status = "error"
-                self.error_msg = str(e)
-                print(f"[CloudRelay] Process error: {e}")
-            finally:
-                if self.status != "error":
-                    self.status = "stopped"
+                if not self._stop_event.is_set():
+                    time.sleep(5.0)
+            self.status = "stopped"
 
         self._thread = threading.Thread(target=_worker, daemon=True, name="OmniSight-CloudRelay")
         self._thread.start()
@@ -286,6 +292,7 @@ class CloudRelayManager:
         hosted_url = f"https://mikoyae-ai.github.io/OmniSight-NVR/?hub={self.cloud_url}" if self.cloud_url else None
         ts_dns = self.tailscale_dns or ("hp250.tailccebcc.ts.net" if self.tailscale_ip else None)
         ts_url = f"http://{ts_dns}:{self.port}" if ts_dns else (f"http://{self.tailscale_ip}:{self.port}" if self.tailscale_ip else None)
+        dir_url = f"http://{ts_dns}:{self.port}/OmniSight-NVR/" if ts_dns else f"http://{self.local_ip}:{self.port}/OmniSight-NVR/"
         ts_https_url = f"https://{ts_dns}" if ts_dns else None
         return {
             "enabled": self.status in ("connecting", "connected"),
@@ -294,6 +301,7 @@ class CloudRelayManager:
             "hosted_url": hosted_url,
             "local_ip": self.local_ip,
             "local_url": f"http://{self.local_ip}:{self.port}",
+            "directory_url": dir_url,
             "tailscale_ip": self.tailscale_ip,
             "tailscale_dns": ts_dns,
             "tailscale_url": ts_url,

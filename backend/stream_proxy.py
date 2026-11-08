@@ -881,11 +881,11 @@ class CameraStreamSession:
         if not ip:
             return 0
 
-        # Hikvision DS-2CD R6 platform cameras stall after 1 keyframe on main stream (101)
-        # over TCP interleaved RTP when 1080p IDR slices exceed the camera's internal buffer;
-        # channel 102 (sub-stream) streams continuously at 25-30 FPS with zero drops.
+        # Stream full 1080p main stream (101) by default; only use sub-stream (102)
+        # if explicitly requested via stream_quality == "sub" or "low".
         vendor = (self.camera_info.get("vendor") or "").strip().lower()
-        if vendor == "hikvision" and path.rstrip("/").endswith("/101"):
+        prefer_sub = str(self.camera_info.get("stream_quality", "high")).lower() in ("sub", "low", "sd")
+        if vendor == "hikvision" and prefer_sub and path.rstrip("/").endswith("/101"):
             path = path.rstrip("/")[:-3] + "102"
 
         clean_uri = f"rtsp://{ip}:{port}{path}"
@@ -1003,25 +1003,25 @@ class CameraStreamSession:
             if b" 200 " not in r_play[:200]:
                 return 0
 
-            # Launch FFmpeg H.264 Annex-B -> MJPEG low-latency pipe decoder
-            # Use -probesize 32 -analyzeduration 0 so sub-streams (e.g. Hikvision 102)
-            # decode and emit their very first frame immediately with zero input buffering.
+            # Launch FFmpeg H.264 Annex-B -> MJPEG low-latency pipe decoder (Full HD 1920x1080)
             fps = str(target_fps)
+            is_sub = path.rstrip("/").endswith("/102")
+            probe_sz = "32" if is_sub else "256000"
             ffmpeg_cmd = [
                 FFMPEG_BIN,
                 "-hide_banner",
                 "-loglevel", "error",
-                "-threads", "1",
-                "-probesize", "32",
+                "-threads", "2",
+                "-probesize", probe_sz,
                 "-analyzeduration", "0",
                 "-fflags", "nobuffer+discardcorrupt",
                 "-flags", "low_delay",
                 "-f", "h264",
                 "-i", "pipe:0",
-                "-vf", "scale='min(1280,iw)':-2:flags=fast_bilinear",
+                "-vf", "scale='min(1920,iw)':-2:flags=fast_bilinear",
                 "-f", "image2pipe",
                 "-vcodec", "mjpeg",
-                "-q:v", "4",
+                "-q:v", "2",
                 "-r", fps,
                 "-flush_packets", "1",
                 "pipe:1",
@@ -1253,10 +1253,10 @@ class CameraStreamSession:
                 "-loglevel", "error",
                 *input_flags,
                 "-i", effective_url,
-                "-vf", "scale='min(1280,iw)':-2:flags=fast_bilinear",
+                "-vf", "scale='min(1920,iw)':-2:flags=fast_bilinear",
                 "-f", "image2pipe",
                 "-vcodec", "mjpeg",
-                "-q:v", "5",
+                "-q:v", "2",
                 "-r", fps,
                 "-flush_packets", "1",
                 "-"

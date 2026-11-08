@@ -26,7 +26,7 @@ DEFAULT_CAMERAS = [
         "port": 554,
         "username": "admin",
         "password": "Hik@1234",
-        "stream_url": "rtsp://admin:Hik%401234@192.168.1.13:554/Streaming/Channels/102",
+        "stream_url": "rtsp://admin:Hik%401234@192.168.1.13:554/Streaming/Channels/101",
         "sub_stream_url": "rtsp://admin:Hik%401234@192.168.1.13:554/Streaming/Channels/102",
         "snapshot_url": "http://192.168.1.13:80/ISAPI/Streaming/channels/101/picture",
         "channel": 1,

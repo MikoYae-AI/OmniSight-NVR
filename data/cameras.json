@@ -13,7 +13,7 @@
       "port": 554,
       "username": "admin",
       "password": "Hik@1234",
-      "stream_url": "rtsp://admin:Hik%401234@192.168.1.13:554/Streaming/Channels/102",
+      "stream_url": "rtsp://admin:Hik%401234@192.168.1.13:554/Streaming/Channels/101",
       "sub_stream_url": "rtsp://admin:Hik%401234@192.168.1.13:554/Streaming/Channels/102",
       "snapshot_url": "http://192.168.1.13:80/ISAPI/Streaming/channels/101/picture",
       "channel": 1,
@@ -23,7 +23,8 @@
       "fps": 25,
       "resolution": "1920x1080",
       "ptz": true,
-      "notes": "Hikvision 2MP Cube IP Camera (DS-2CD2420F-IW, R6 Platform)."
+      "notes": "Hikvision 2MP Cube IP Camera (DS-2CD2420F-IW, R6 Platform).",
+      "ie_mode": true
     },
     {
       "id": "cam-gatocam-01",
@@ -148,5 +149,86 @@
       "auth_type": "google",
       "created_at": 1789382845
     }
-  ]
+  ],
+  "sessions": {
+    "8c338f06a072f8aa870ba41452e00cfc2b2e02e2f4161dce027415082d59d319": {
+      "token": "8c338f06a072f8aa870ba41452e00cfc2b2e02e2f4161dce027415082d59d319",
+      "username": "admin",
+      "expires_at": 1794219145.3759246
+    },
+    "54566738e64657cfb2a682bab0441f97fd356ce9c53f76b95b15b452812d31c1": {
+      "token": "54566738e64657cfb2a682bab0441f97fd356ce9c53f76b95b15b452812d31c1",
+      "username": "admin",
+      "expires_at": 1794220652.837866
+    },
+    "d57d8b6c8e6e508166eae4584ace13b8d75537844ef0db54e3690921220d2075": {
+      "token": "d57d8b6c8e6e508166eae4584ace13b8d75537844ef0db54e3690921220d2075",
+      "username": "admin",
+      "expires_at": 1794220653.9479468
+    },
+    "51eb53bfc7e01400afd9354bbaac61f1714f28a96f859cba2d935d97305edb39": {
+      "token": "51eb53bfc7e01400afd9354bbaac61f1714f28a96f859cba2d935d97305edb39",
+      "username": "admin",
+      "expires_at": 1794220675.7169378
+    },
+    "38d0356ca68476dab438ec825d1b8c5ca6002f6eb21931207def51881f0ac162": {
+      "token": "38d0356ca68476dab438ec825d1b8c5ca6002f6eb21931207def51881f0ac162",
+      "username": "admin",
+      "expires_at": 1794220676.2855759
+    },
+    "b1201521ba2598f742eb0812c9a313e8b4bda6e9a230b9d7f0c7e00645138552": {
+      "token": "b1201521ba2598f742eb0812c9a313e8b4bda6e9a230b9d7f0c7e00645138552",
+      "username": "admin",
+      "expires_at": 1794234481.2507582
+    },
+    "70ff908f40da491f4c2a95917d9f4ec7d0bead8ad010c9eb70909dddac9f195f": {
+      "token": "70ff908f40da491f4c2a95917d9f4ec7d0bead8ad010c9eb70909dddac9f195f",
+      "username": "admin",
+      "expires_at": 1794234482.342749
+    },
+    "2e430487654cf02af5d4ebf806625b743c8b3a142057c68bda2e369e9615513b": {
+      "token": "2e430487654cf02af5d4ebf806625b743c8b3a142057c68bda2e369e9615513b",
+      "username": "admin",
+      "expires_at": 1794234504.6362796
+    },
+    "5447d01cb7cce9b6c97972f28666846846ee6ee02822301cd2ebb595a543e80f": {
+      "token": "5447d01cb7cce9b6c97972f28666846846ee6ee02822301cd2ebb595a543e80f",
+      "username": "admin",
+      "expires_at": 1794234505.2103329
+    },
+    "fc1d4c5732a5ae23f9361cd76bc461b31887f5208e1e8314e8e8e2489ea189be": {
+      "token": "fc1d4c5732a5ae23f9361cd76bc461b31887f5208e1e8314e8e8e2489ea189be",
+      "username": "admin",
+      "expires_at": 1794234531.0182028
+    },
+    "60729c802adea8148ad528a8fc422d8e4de7e96e1a456efa5dd59a501e7e7e20": {
+      "token": "60729c802adea8148ad528a8fc422d8e4de7e96e1a456efa5dd59a501e7e7e20",
+      "username": "nimuthumethsenganegoda",
+      "email": "nimuthumethsenganegoda@gmail.com",
+      "name": "Nimuthu",
+      "picture": "",
+      "auth_type": "google",
+      "expires_at": 1794244726.915736
+    },
+    "abc6c3cb426eeb02bdada16c91709add8505522985429f13576246b97597b904": {
+      "token": "abc6c3cb426eeb02bdada16c91709add8505522985429f13576246b97597b904",
+      "username": "admin",
+      "expires_at": 1794245805.2668262
+    },
+    "76301152d2563c76da4a4e94770fdda31e903544e21950ba3395a5c77ba69a70": {
+      "token": "76301152d2563c76da4a4e94770fdda31e903544e21950ba3395a5c77ba69a70",
+      "username": "admin",
+      "expires_at": 1794245806.367559
+    },
+    "d0167a0c38fe1a02dc1328bc9d0d50738b5bd989cf60d8ef18a2f027c37fe42e": {
+      "token": "d0167a0c38fe1a02dc1328bc9d0d50738b5bd989cf60d8ef18a2f027c37fe42e",
+      "username": "admin",
+      "expires_at": 1794245828.6106946
+    },
+    "d505110e47a01769833f9a94181c8dad11eeebfa3efee5f4c6056941eadf6948": {
+      "token": "d505110e47a01769833f9a94181c8dad11eeebfa3efee5f4c6056941eadf6948",
+      "username": "admin",
+      "expires_at": 1794245829.1888967
+    }
+  }
 }
