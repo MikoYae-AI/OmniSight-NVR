@@ -318,6 +318,77 @@ class OmniSightHandler(BaseHTTPRequestHandler):
             self.end_headers()
             return
 
+        # Public or Authenticated API: IE / WebComponents Native Portal & Proxy (/api/cameras/<id>/ie-portal, /ie-plugin, /ie-proxy/...)
+        if path.startswith("/api/cameras/") and ("/ie-portal" in path or "/ie-plugin" in path or "/ie-proxy/" in path or "/WebComponents.exe" in path):
+            parts = path.split("/")
+            cam_id = parts[3] if len(parts) > 3 else ""
+            cam = config_manager.get_camera(cam_id)
+            if not cam and cam_id == "direct":
+                cam = {
+                    "id": "direct",
+                    "name": query.get("name", ["Legacy IE Camera"])[0],
+                    "ip": query.get("ip", ["192.168.1.13"])[0],
+                    "port": int(query.get("port", ["554"])[0] or 554),
+                    "username": query.get("username", ["admin"])[0],
+                    "password": query.get("password", [""])[0],
+                    "vendor": query.get("vendor", ["hikvision"])[0],
+                    "channel": int(query.get("channel", ["1"])[0] or 1),
+                }
+            if not cam:
+                self.send_json({"error": "Camera not found"}, 404)
+                return
+
+            if path.endswith("/ie-plugin") or path.endswith("/WebComponents.exe"):
+                self.serve_camera_ie_plugin(cam)
+                return
+            if "/ie-proxy/" in path:
+                sub_path = "/" + path.split("/ie-proxy/", 1)[1]
+                if parsed.query:
+                    sub_path += "?" + parsed.query
+                self.proxy_camera_http(cam, sub_path)
+                return
+            self.serve_ie_portal(cam, query)
+            return
+
+        # Public or Authenticated API: Camera Stream, Snapshot & Status (so Edge IE Mode / direct links work seamlessly)
+        if path.startswith("/api/cameras/") and path.endswith("/status"):
+            cam_id = path.split("/")[3]
+            session = stream_manager.get_session(cam_id)
+            if not session:
+                self.send_json({"error": "Camera not found"}, 404)
+                return
+            self.send_json(session.get_status())
+            return
+
+        if path.startswith("/api/cameras/") and path.endswith("/stream"):
+            cam_id = path.split("/")[3]
+            session = stream_manager.get_session(cam_id)
+            if not session:
+                self.send_json({"error": "Camera not found"}, 404)
+                return
+            self.serve_mjpeg_stream(session)
+            return
+
+        if path.startswith("/api/cameras/") and path.endswith("/snapshot"):
+            cam_id = path.split("/")[3]
+            session = stream_manager.get_session(cam_id)
+            if not session:
+                self.send_json({"error": "Camera not found"}, 404)
+                return
+            live = session.get_status()
+            frame = session.get_latest_frame()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/jpeg")
+            self.send_header("Content-Length", str(len(frame)))
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.send_cors_headers()
+            self.send_header("X-Camera-Status", live["status"])
+            self.send_header("X-Camera-Online", "true" if live["online"] else "false")
+            self.send_header("Access-Control-Expose-Headers", "X-Camera-Status, X-Camera-Online")
+            self.end_headers()
+            self.wfile.write(frame)
+            return
+
         # Protect all remaining /api/* endpoints
         if path.startswith("/api/"):
             session = self.get_authenticated_user(query)
@@ -355,49 +426,6 @@ class OmniSightHandler(BaseHTTPRequestHandler):
                 self.send_json({"error": "Camera not found"}, 404)
             return
 
-        # API: Live status of a single camera (/api/cameras/<id>/status)
-        if path.startswith("/api/cameras/") and path.endswith("/status"):
-            cam_id = path.split("/")[3]
-            session = stream_manager.get_session(cam_id)
-            if not session:
-                self.send_json({"error": "Camera not found"}, 404)
-                return
-            self.send_json(session.get_status())
-            return
-
-        # API: Stream Camera (MJPEG boundary stream)
-        if path.startswith("/api/cameras/") and path.endswith("/stream"):
-            cam_id = path.split("/")[3]
-            session = stream_manager.get_session(cam_id)
-            if not session:
-                self.send_json({"error": "Camera not found"}, 404)
-                return
-
-            self.serve_mjpeg_stream(session)
-            return
-
-        # API: Snapshot of Camera
-        if path.startswith("/api/cameras/") and path.endswith("/snapshot"):
-            cam_id = path.split("/")[3]
-            session = stream_manager.get_session(cam_id)
-            if not session:
-                self.send_json({"error": "Camera not found"}, 404)
-                return
-            live = session.get_status()
-            frame = session.get_latest_frame()
-            self.send_response(200)
-            self.send_header("Content-Type", "image/jpeg")
-            self.send_header("Content-Length", str(len(frame)))
-            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
-            self.send_cors_headers()
-            # Lets the dashboard tell "real frames" apart from the offline HUD placeholder.
-            self.send_header("X-Camera-Status", live["status"])
-            self.send_header("X-Camera-Online", "true" if live["online"] else "false")
-            self.send_header("Access-Control-Expose-Headers", "X-Camera-Status, X-Camera-Online")
-            self.end_headers()
-            self.wfile.write(frame)
-            return
-
         # API: 24-Hour Timeline Events
         if path.startswith("/api/cameras/") and path.endswith("/timeline"):
             cam_id = path.split("/")[3]
@@ -406,7 +434,7 @@ class OmniSightHandler(BaseHTTPRequestHandler):
             self.send_json(events)
             return
 
-        # API: Historical Playback Frame
+        # API:Historical Playback Frame
         if path.startswith("/api/cameras/") and path.endswith("/playback"):
             cam_id = path.split("/")[3]
             try:
@@ -1013,6 +1041,239 @@ class OmniSightHandler(BaseHTTPRequestHandler):
         finally:
             with session._lock:
                 session.active_subscribers = max(0, session.active_subscribers - 1)
+
+    def _build_camera_opener(self, ip: str, http_port: int, username: str, password: str):
+        mgr = urllib.request.HTTPPasswordMgrWithDefaultRealm()
+        base_uri = f"http://{ip}:{http_port}/"
+        mgr.add_password(None, base_uri, username, password)
+        mgr.add_password(None, f"http://{ip}/", username, password)
+        return urllib.request.build_opener(
+            urllib.request.HTTPDigestAuthHandler(mgr),
+            urllib.request.HTTPBasicAuthHandler(mgr),
+        )
+
+    def serve_camera_ie_plugin(self, cam: Dict[str, Any]):
+        """Proxies or downloads WebComponents.exe / ActiveX cab installer directly from the camera."""
+        ip = (cam.get("ip") or "192.168.1.13").strip()
+        username = cam.get("username") or "admin"
+        password = cam.get("password") or ""
+        opener = self._build_camera_opener(ip, 80, username, password)
+        for plugin_path in ("/codebase/WebComponents.exe", "/WebComponents.exe", "/doc/codebase/WebComponents.exe"):
+            try:
+                url = f"http://{ip}:80{plugin_path}"
+                with opener.open(url, timeout=10.0) as resp:
+                    data = resp.read()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/octet-stream")
+                    self.send_header("Content-Disposition", 'attachment; filename="WebComponents.exe"')
+                    self.send_header("Content-Length", str(len(data)))
+                    self.send_cors_headers()
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
+            except Exception:
+                continue
+        self.send_json({"error": f"ActiveX installer WebComponents.exe not found on {ip}"}, 404)
+
+    def proxy_camera_http(self, cam: Dict[str, Any], sub_path: str):
+        """Authenticated HTTP proxy to the camera's native web interface (ISAPI / doc / codebase)."""
+        ip = (cam.get("ip") or "192.168.1.13").strip()
+        username = cam.get("username") or "admin"
+        password = cam.get("password") or ""
+        opener = self._build_camera_opener(ip, 80, username, password)
+        target_url = f"http://{ip}:80{sub_path}"
+        try:
+            req = urllib.request.Request(target_url, headers={"User-Agent": "Mozilla/5.0 (compatible; MSIE 11.0; Windows NT 10.0; WOW64; Trident/7.0)"})
+            with opener.open(req, timeout=8.0) as resp:
+                data = resp.read()
+                ctype = resp.headers.get("Content-Type", "application/octet-stream")
+                self.send_response(resp.status)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("X-UA-Compatible", "IE=EmulateIE11")
+                self.send_cors_headers()
+                self.end_headers()
+                self.wfile.write(data)
+        except urllib.error.HTTPError as e:
+            self.send_json({"error": f"Camera returned HTTP {e.code}", "url": target_url}, e.code)
+        except Exception as e:
+            self.send_json({"error": f"Camera proxy error: {e}", "url": target_url}, 502)
+
+    def serve_ie_portal(self, cam: Dict[str, Any], query: Dict[str, list]):
+        """Serves a dedicated IE / Edge IE Mode & ActiveX (WebComponents.exe) compatibility portal for the camera."""
+        import base64
+        token = self.extract_token(query) or ""
+        cam_id = cam.get("id", "cam-hikvision-13")
+        cam_name = cam.get("name", "Camera")
+        ip = (cam.get("ip") or "192.168.1.13").strip()
+        rtsp_port = int(cam.get("port", 554) or 554)
+        username = cam.get("username") or "admin"
+        password = cam.get("password") or ""
+        channel = int(cam.get("channel", 1) or 1)
+        plugin_auth = base64.b64encode(f":{username}:{password}".encode("utf-8")).decode("ascii")
+        basic_auth = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
+        rtsp_main = f"rtsp://{ip}:{rtsp_port}/ISAPI/streaming/channels/{channel}01"
+        rtsp_sub = f"rtsp://{ip}:{rtsp_port}/ISAPI/streaming/channels/{channel}02"
+        stream_url = f"/api/cameras/{cam_id}/stream?token={urllib.parse.quote(token)}"
+        snap_url = f"/api/cameras/{cam_id}/snapshot?token={urllib.parse.quote(token)}"
+        isapi_snap_url = f"/api/cameras/{cam_id}/ie-proxy/ISAPI/Streaming/channels/{channel}01/picture?token={urllib.parse.quote(token)}"
+        plugin_dl_url = f"/api/cameras/{cam_id}/ie-plugin?token={urllib.parse.quote(token)}"
+        initial_mode = (query.get("mode", [""])[0] or "").strip().lower()
+
+        html = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,EmulateIE11" />
+  <title>{cam_name} — IE / ActiveX &amp; Universal Stream Portal</title>
+  <style>
+    body {{ margin: 0; background: #0d0d11; color: #f5f5f7; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }}
+    .ie-bar {{ display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 14px; background: #16161d; border-bottom: 1px solid rgba(255,255,255,0.1); font-size: 12px; flex-wrap: wrap; }}
+    .ie-title {{ font-weight: 600; color: #fff; display: flex; align-items: center; gap: 8px; }}
+    .ie-badge {{ background: rgba(10, 132, 255, 0.18); color: #5ac8fa; border: 1px solid rgba(10, 132, 255, 0.4); padding: 2px 8px; border-radius: 6px; font-size: 11px; }}
+    .ie-actions {{ display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }}
+    .ie-btn {{ background: rgba(255,255,255,0.08); color: #f5f5f7; border: 1px solid rgba(255,255,255,0.16); padding: 5px 10px; border-radius: 6px; font-size: 11px; cursor: pointer; text-decoration: none; }}
+    .ie-btn:hover, .ie-btn.active {{ background: #0a84ff; border-color: #0a84ff; color: #fff; }}
+    .ie-stage {{ flex: 1; position: relative; display: flex; align-items: center; justify-content: center; background: #000; overflow: hidden; }}
+    .ie-stage img {{ width: 100%; height: 100%; object-fit: contain; }}
+    .ie-status {{ position: absolute; bottom: 10px; left: 12px; background: rgba(0,0,0,0.72); border: 1px solid rgba(255,255,255,0.15); padding: 4px 10px; border-radius: 6px; font-size: 11px; font-family: monospace; color: #34c759; pointer-events: none; }}
+  </style>
+</head>
+<body>
+  <div class="ie-bar">
+    <div class="ie-title">
+      <span>🌐 {cam_name} ({ip})</span>
+      <span class="ie-badge" id="engineBadge">Engine: Auto</span>
+    </div>
+    <div class="ie-actions">
+      <button type="button" class="ie-btn" id="btnModeActiveX" onclick="switchEngine('activex')">🪟 IE ActiveX (WebComponents)</button>
+      <button type="button" class="ie-btn" id="btnModeStream" onclick="switchEngine('mjpeg')">⚡ Live Stream</button>
+      <button type="button" class="ie-btn" id="btnModeSnap" onclick="switchEngine('snapshot')">📸 High-Res ISAPI (1080p)</button>
+      <button type="button" class="ie-btn" id="btnModeWebUi" onclick="switchEngine('webui')">🖥️ Embedded Camera Web UI</button>
+      <a class="ie-btn" href="{plugin_dl_url}" download="WebComponents.exe" title="Download official Hikvision WebComponents.exe ActiveX plugin from camera">⬇ WebComponents.exe</a>
+      <a class="ie-btn" href="http://{ip}/doc/page/preview.asp" target="_blank" rel="noopener" title="Open camera's built-in IE web page directly on LAN">↗ Direct Camera UI ({ip})</a>
+    </div>
+  </div>
+  <div class="ie-stage" id="stageContainer">
+    <div id="pluginHost" style="width:100%;height:100%;display:none;"></div>
+    <iframe id="webUiFrame" src="about:blank" style="width:100%;height:100%;border:0;display:none;background:#000;"></iframe>
+    <img id="liveImg" alt="{cam_name}" style="display:none;" />
+    <div class="ie-status" id="statusHud">Initializing stream...</div>
+  </div>
+  <script>
+    var CAM_IP = "{ip}";
+    var PLUGIN_AUTH = "{plugin_auth}";
+    var BASIC_AUTH = "{basic_auth}";
+    var RTSP_MAIN = "{rtsp_main}";
+    var RTSP_SUB = "{rtsp_sub}";
+    var STREAM_URL = "{stream_url}";
+    var SNAP_URL = "{snap_url}";
+    var ISAPI_SNAP_URL = "{isapi_snap_url}";
+    var INITIAL_MODE = "{initial_mode}";
+    var pollTimer = null;
+
+    function isIEOrActiveXSupported() {{
+      return ("ActiveXObject" in window) || /MSIE|Trident/i.test(navigator.userAgent);
+    }}
+
+    function switchEngine(mode) {{
+      if (pollTimer) {{ clearTimeout(pollTimer); pollTimer = null; }}
+      var pluginHost = document.getElementById("pluginHost");
+      var webUiFrame = document.getElementById("webUiFrame");
+      var liveImg = document.getElementById("liveImg");
+      var badge = document.getElementById("engineBadge");
+      var hud = document.getElementById("statusHud");
+      document.getElementById("btnModeActiveX").className = "ie-btn" + (mode === "activex" ? " active" : "");
+      document.getElementById("btnModeStream").className = "ie-btn" + (mode === "mjpeg" ? " active" : "");
+      document.getElementById("btnModeSnap").className = "ie-btn" + (mode === "snapshot" ? " active" : "");
+      document.getElementById("btnModeWebUi").className = "ie-btn" + (mode === "webui" ? " active" : "");
+
+      if (mode === "webui") {{
+        liveImg.style.display = "none";
+        pluginHost.style.display = "none";
+        pluginHost.innerHTML = "";
+        webUiFrame.style.display = "block";
+        webUiFrame.src = "http://" + CAM_IP + "/doc/page/preview.asp";
+        badge.innerHTML = "Camera Native IE Web UI";
+        hud.innerHTML = "Loaded http://" + CAM_IP + "/doc/page/preview.asp (enable Edge IE Mode for ActiveX)";
+        return;
+      }}
+
+      webUiFrame.style.display = "none";
+      webUiFrame.src = "about:blank";
+
+      if (mode === "activex") {{
+        liveImg.style.display = "none";
+        pluginHost.style.display = "block";
+        badge.innerHTML = "IE ActiveX (clsid:E7EF736D)";
+        pluginHost.innerHTML = "<object classid='clsid:E7EF736D-B4E6-4A5A-BA94-732D71107808' codebase='{plugin_dl_url}' standby='Loading Hikvision WebComponents ActiveX...' id='PreviewActiveX' width='100%' height='100%' name='ocx'><param name='wndtype' value='1'><param name='playmode' value='normal'><param name='needborder' value='1'></object>";
+        setTimeout(function() {{
+          var ocx = document.getElementById("PreviewActiveX");
+          if (ocx && typeof ocx.HWP_Play !== "undefined") {{
+            var rc = ocx.HWP_Play(RTSP_MAIN, PLUGIN_AUTH, 0, "", "");
+            hud.innerHTML = rc === 0 ? "ActiveX HWP_Play Connected (" + RTSP_MAIN + ")" : "ActiveX HWP_Play rc=" + rc + " (trying sub-stream)";
+            if (rc !== 0) ocx.HWP_Play(RTSP_SUB, PLUGIN_AUTH, 0, "", "");
+          }} else {{
+            hud.innerHTML = "ActiveX control not loaded in this browser — auto-engaging Live Stream fallback (use Edge IE Mode + WebComponents.exe for native ActiveX).";
+            if (!isIEOrActiveXSupported()) {{
+              setTimeout(function() {{
+                pluginHost.style.display = "none";
+                liveImg.style.display = "block";
+                liveImg.src = STREAM_URL + "&_t=" + new Date().getTime();
+              }}, 900);
+            }}
+          }}
+        }}, 400);
+        return;
+      }}
+
+      pluginHost.style.display = "none";
+      pluginHost.innerHTML = "";
+      liveImg.style.display = "block";
+
+      var isTunnel = location.hostname.indexOf("trycloudflare.com") !== -1 || location.hostname.indexOf("github.io") !== -1;
+      if (mode === "mjpeg" && !isTunnel) {{
+        badge.innerHTML = "Multipart MJPEG Stream (30 FPS)";
+        hud.innerHTML = "Streaming live MJPEG via OmniSight Hub";
+        liveImg.src = STREAM_URL + "&_t=" + new Date().getTime();
+        return;
+      }}
+
+      var targetSnap = mode === "snapshot" ? ISAPI_SNAP_URL : SNAP_URL;
+      badge.innerHTML = mode === "snapshot" ? "ISAPI Direct 1080p Polling" : "Zero-Buffer Frame Stream";
+      hud.innerHTML = mode === "snapshot" ? "Polling high-res 1920x1080 ISAPI JPEG directly from camera" : "Streaming continuous frames via OmniSight Hub";
+      function pullNext() {{
+        var pre = new Image();
+        pre.onload = function() {{
+          liveImg.src = pre.src;
+          pollTimer = setTimeout(pullNext, mode === "snapshot" ? 200 : 55);
+        }};
+        pre.onerror = function() {{
+          pollTimer = setTimeout(pullNext, 800);
+        }};
+        pre.src = targetSnap + "&_t=" + new Date().getTime();
+      }}
+      pullNext();
+    }}
+
+    if (INITIAL_MODE === "activex" || INITIAL_MODE === "mjpeg" || INITIAL_MODE === "snapshot" || INITIAL_MODE === "webui") {{
+      switchEngine(INITIAL_MODE);
+    }} else if (isIEOrActiveXSupported()) {{
+      switchEngine("activex");
+    }} else {{
+      switchEngine("mjpeg");
+    }}
+  </script>
+</body>
+</html>"""
+        body = html.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("X-UA-Compatible", "IE=EmulateIE11")
+        self.send_cors_headers()
+        self.end_headers()
+        self.wfile.write(body)
 
 
 def run_server(host: str = "0.0.0.0", port: int = 8080, enable_cloud: bool = True):

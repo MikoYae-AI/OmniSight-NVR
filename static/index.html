@@ -84,8 +84,8 @@
           <button class="btn-action btn-secondary" id="btnFirmwareHub" title="OpenIPC community firmware & official updates">
             <span class="icon"></span> OpenIPC &amp; Firmware
           </button>
-          <button class="btn-action btn-warning" id="btnCamControl" title="Control camera hardware directly with zero Internet Explorer or Edge">
-            <span class="icon">⚙️</span> Zero-IE Control
+          <button class="btn-action btn-warning" id="btnCamControl" title="Control camera hardware directly or launch IE / WebComponents ActiveX Mode">
+            <span class="icon">⚙️</span> IE &amp; Hardware Control
           </button>
           <button class="btn-action btn-secondary" id="btnBrowserNode" title="Stream Phone or Laptop Camera into Matrix as a Surveillance Node">
             <span class="icon">📱</span> Camera Node
@@ -371,8 +371,19 @@
           </div>
 
           <div class="form-group" style="margin-bottom: 4px;">
-            <label style="font-size: 11px; color: var(--text-muted);">Hub URL (LAN IP, Tailscale, or https tunnel)</label>
-            <input type="text" id="hubConnectorUrlInput" placeholder="https://your-tunnel.trycloudflare.com  ·  http://192.168.1.50:8080" style="font-family: monospace; font-size: 12px; padding: 8px 12px; width: 100%;">
+            <label style="font-size: 11px; color: var(--text-muted);">Hub URL (LAN IP, Tailscale MagicDNS <code>hp250.tailccebcc.ts.net</code>, or https tunnel)</label>
+            <input type="text" id="hubConnectorUrlInput" placeholder="http://hp250.tailccebcc.ts.net:8080  ·  https://hp250.tailccebcc.ts.net" style="font-family: monospace; font-size: 12px; padding: 8px 12px; width: 100%;">
+            <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px;">
+              <button type="button" class="btn-action btn-secondary" id="btnPresetTailscaleHttp" style="font-size: 11px; padding: 4px 10px;">
+                🟣 Tailscale HTTP (hp250.tailccebcc.ts.net:8080)
+              </button>
+              <button type="button" class="btn-action btn-secondary" id="btnPresetTailscaleHttps" style="font-size: 11px; padding: 4px 10px;">
+                🔒 Tailscale HTTPS (hp250.tailccebcc.ts.net)
+              </button>
+              <button type="button" class="btn-action btn-secondary" id="btnPresetLanHub" style="font-size: 11px; padding: 4px 10px;">
+                🏠 Local LAN (192.168.1.63:8080)
+              </button>
+            </div>
           </div>
 
           <!-- Optional sign-in (remembered via session token, never the password) -->
@@ -502,9 +513,15 @@
             </div>
           </div>
 
-          <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-secondary); padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06);">
-            <span>LAN: <code id="cloudLanIp" style="color: var(--apple-blue);">Detecting...</code></span>
-            <span>Tailscale: <code id="cloudTailscaleIp" style="color: #bf5af2;">Detecting...</code></span>
+          <div style="display: flex; flex-direction: column; gap: 6px; font-size: 11px; color: var(--text-secondary); padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06);">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span>Tailscale Domain: <a href="http://hp250.tailccebcc.ts.net:8080" target="_blank" rel="noopener" id="cloudTailscaleDomainLink" style="color: #bf5af2; font-family: monospace; font-weight: 600;">http://hp250.tailccebcc.ts.net:8080</a></span>
+              <code id="cloudTailscaleIp" style="color: #bf5af2;">100.66.23.119:8080</code>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span>Local LAN Hub: <code id="cloudLanIp" style="color: var(--apple-blue);">http://192.168.1.63:8080</code></span>
+              <a href="https://hp250.tailccebcc.ts.net" target="_blank" rel="noopener" style="color: var(--accent-green); font-family: monospace;">https://hp250.tailccebcc.ts.net</a>
+            </div>
           </div>
         </div>
 
@@ -740,6 +757,9 @@
             <input type="checkbox" id="camPtz" name="ptz"> Enable Virtual PTZ Controls
           </label>
           <label class="checkbox-label">
+            <input type="checkbox" id="camIeMode" name="ie_mode"> Native IE / WebComponents ActiveX Mode (Works with IE / Edge IE Mode)
+          </label>
+          <label class="checkbox-label">
             <input type="checkbox" id="camLegacyPolling" name="legacy_polling"> Legacy Direct Snapshot Mode (No ActiveX / IE needed)
           </label>
           <label class="checkbox-label">
@@ -747,9 +767,19 @@
           </label>
         </div>
 
-        <div class="modal-footer">
-          <button type="button" class="btn-action btn-ghost" id="btnCancelCam">Cancel</button>
-          <button type="submit" class="btn-action btn-primary">Save Camera</button>
+        <div class="modal-footer" style="justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+          <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+            <button type="button" class="btn-action btn-secondary" id="btnModalOpenIePortal" title="Open IE / WebComponents ActiveX Portal for this camera">
+              🪟 Open IE Portal
+            </button>
+            <button type="button" class="btn-action btn-secondary" id="btnModalDownloadPlugin" title="Download WebComponents.exe ActiveX plugin from camera">
+              ⬇️ WebComponents.exe
+            </button>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <button type="button" class="btn-action btn-ghost" id="btnCancelCam">Cancel</button>
+            <button type="submit" class="btn-action btn-primary">Save Camera</button>
+          </div>
         </div>
       </form>
     </div>
@@ -881,30 +911,30 @@
     </div>
   </div>
 
-  <!-- MODAL: Zero-IE Direct Camera Controller -->
+  <!-- MODAL: IE / ActiveX & Direct Camera Controller -->
   <div class="modal-overlay hidden" id="camControlModal">
     <div class="modal-dialog modal-large">
       <div class="modal-header">
-        <h3>⚙️ Zero-IE Camera Control Center</h3>
+        <h3>⚙️ IE / WebComponents ActiveX &amp; Direct Hardware Control</h3>
         <button class="btn-close" id="btnCloseCamControlModal">&times;</button>
       </div>
       <div class="modal-body">
         <p class="section-desc">
-          No Microsoft Edge. No Internet Explorer. No ActiveX. Control your camera's hardware parameters directly 
-          via native HTTP ISAPI and CGI commands from your modern browser.
+          Supports <strong>both</strong> native Internet Explorer / Edge IE Mode (<code>WebComponents.exe</code> ActiveX <code>clsid:E7EF736D-B4E6-4A5A-BA94-732D71107808</code>)
+          <strong>and</strong> plugin-free HTML5 ISAPI / CGI hardware control.
         </p>
 
         <div class="form-row">
           <div class="form-group flex-2">
             <label for="ctrlIp">Target Camera IP</label>
-            <input type="text" id="ctrlIp" placeholder="192.168.1.100">
+            <input type="text" id="ctrlIp" value="192.168.1.13" placeholder="192.168.1.13">
           </div>
           <div class="form-group flex-1">
             <label for="ctrlVendor">Architecture</label>
             <select id="ctrlVendor">
-              <option value="hikvision">Hikvision ISAPI</option>
-              <option value="xiongmai">Xiongmai (Chinese Cam CGI)</option>
-              <option value="dahua">Dahua CGI</option>
+              <option value="hikvision">Hikvision ISAPI / WebComponents ActiveX</option>
+              <option value="xiongmai">Xiongmai (Chinese Cam ActiveX / CGI)</option>
+              <option value="dahua">Dahua WebPlugin / CGI</option>
               <option value="generic_onvif">ONVIF Service</option>
             </select>
           </div>
@@ -917,12 +947,21 @@
           </div>
           <div class="form-group flex-1">
             <label for="ctrlPass">Password</label>
-            <input type="password" id="ctrlPass" placeholder="••••••••">
+            <input type="password" id="ctrlPass" value="Hik@1234" placeholder="••••••••">
           </div>
         </div>
 
-        <div class="action-buttons" style="flex-wrap: wrap; margin-top: 8px;">
-          <button type="button" class="btn-action btn-primary" id="btnCtrlReboot">
+        <div class="action-buttons" style="flex-wrap: wrap; margin-top: 8px; gap: 8px;">
+          <button type="button" class="btn-action btn-primary" id="btnCtrlOpenIePortal" title="Launch embedded IE / WebComponents ActiveX & Universal Stream Portal">
+            <span class="icon">🪟</span> Launch IE / ActiveX Portal
+          </button>
+          <button type="button" class="btn-action btn-secondary" id="btnCtrlDownloadPlugin" title="Download official WebComponents.exe ActiveX installer directly from the camera">
+            <span class="icon">⬇️</span> Download WebComponents.exe
+          </button>
+          <button type="button" class="btn-action btn-secondary" id="btnCtrlOpenCameraWeb" title="Open the camera's native IE web page (/doc/page/preview.asp)">
+            <span class="icon">🌐</span> Open Camera IE Web UI
+          </button>
+          <button type="button" class="btn-action btn-secondary" id="btnCtrlReboot">
             <span class="icon">🔄</span> Reboot Camera
           </button>
           <button type="button" class="btn-action btn-secondary" id="btnCtrlSyncTime">
@@ -934,6 +973,10 @@
           <button type="button" class="btn-action btn-secondary" id="btnCtrlTestSnapshot">
             <span class="icon">📸</span> Test Snapshot Stream
           </button>
+        </div>
+
+        <div id="iePortalPreviewBox" class="hidden" style="margin-top: 12px; border: 1px solid rgba(10, 132, 255, 0.35); border-radius: 10px; overflow: hidden; background: #000;">
+          <iframe id="iePortalIframe" src="about:blank" style="width: 100%; height: 340px; border: 0; display: block;"></iframe>
         </div>
 
         <div class="form-group" style="margin-top: 10px;">
@@ -1321,8 +1364,8 @@
         <button class="mobile-menu-item" id="sheetCamControl">
           <span class="icon">⚙️</span>
           <div class="item-text">
-            <strong>Zero-IE Hardware Control</strong>
-            <span>Reboot &amp; control legacy cameras without ActiveX</span>
+            <strong>IE &amp; Hardware Control</strong>
+            <span>Launch IE / WebComponents ActiveX or direct ISAPI/CGI control</span>
           </div>
         </button>
         <button class="mobile-menu-item" id="sheetVendorGuide">

@@ -38,6 +38,7 @@ class CloudRelayManager:
         self.qr_data_url: Optional[str] = None
         self.local_ip: str = self._detect_local_ip()
         self.tailscale_ip: Optional[str] = self._detect_tailscale_ip()
+        self.tailscale_dns: Optional[str] = self._detect_tailscale_dns()
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
 
@@ -79,6 +80,29 @@ class CloudRelayManager:
             pass
         return None
 
+    def _detect_tailscale_dns(self) -> Optional[str]:
+        """Detects the Tailscale MagicDNS hostname (e.g. hp250.tailccebcc.ts.net)."""
+        try:
+            res = subprocess.run(
+                ["tailscale", "status", "--json"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=2
+            )
+            if res.returncode == 0 and res.stdout.strip():
+                data = json.loads(res.stdout)
+                dns_name = (data.get("Self") or {}).get("DNSName", "").strip().rstrip(".")
+                if dns_name and ".ts.net" in dns_name:
+                    return dns_name
+                suffix = (data.get("MagicDNSSuffix") or "").strip().rstrip(".")
+                host = ((data.get("Self") or {}).get("HostName") or "").strip().lower()
+                if host and suffix and ".ts.net" in suffix:
+                    return f"{host}.{suffix}"
+        except Exception:
+            pass
+        return "hp250.tailccebcc.ts.net" if self.tailscale_ip else None
+
     def _generate_qr(self, url: str):
         if not QR_SUPPORT:
             return
@@ -107,8 +131,10 @@ class CloudRelayManager:
         print(f"  ✦ Global 4G/Cloud URL : \033[1;36m{url}\033[0m")
         print(f"  ✦ Hosted Web Link     : \033[1;32m{hosted_link}\033[0m")
         print(f"  ✦ Local Network (LAN) : http://{self.local_ip}:{self.port}")
+        if self.tailscale_dns:
+            print(f"  ✦ Tailscale MagicDNS  : \033[1;35mhttp://{self.tailscale_dns}:{self.port}\033[0m")
         if self.tailscale_ip:
-            print(f"  ✦ Tailscale Mesh VPN  : http://{self.tailscale_ip}:{self.port}")
+            print(f"  ✦ Tailscale Mesh IP   : http://{self.tailscale_ip}:{self.port}")
         print("═" * 68)
         print("  ✦ Scan with iPhone/Android Camera to View on 4G Cellular:")
 
@@ -129,6 +155,9 @@ class CloudRelayManager:
             os.makedirs(os.path.dirname(tunnel_json_path), exist_ok=True)
             meta = {
                 "cloud_url": url,
+                "tailscale_dns": self.tailscale_dns or "hp250.tailccebcc.ts.net",
+                "tailscale_url": f"http://{self.tailscale_dns or 'hp250.tailccebcc.ts.net'}:{self.port}",
+                "tailscale_https_url": f"https://{self.tailscale_dns or 'hp250.tailccebcc.ts.net'}",
                 "updated_at": int(time.time()),
             }
             with open(tunnel_json_path, "w", encoding="utf-8") as f:
@@ -255,6 +284,9 @@ class CloudRelayManager:
 
     def get_status(self) -> Dict[str, Any]:
         hosted_url = f"https://mikoyae-ai.github.io/OmniSight-NVR/?hub={self.cloud_url}" if self.cloud_url else None
+        ts_dns = self.tailscale_dns or ("hp250.tailccebcc.ts.net" if self.tailscale_ip else None)
+        ts_url = f"http://{ts_dns}:{self.port}" if ts_dns else (f"http://{self.tailscale_ip}:{self.port}" if self.tailscale_ip else None)
+        ts_https_url = f"https://{ts_dns}" if ts_dns else None
         return {
             "enabled": self.status in ("connecting", "connected"),
             "status": self.status,
@@ -263,7 +295,9 @@ class CloudRelayManager:
             "local_ip": self.local_ip,
             "local_url": f"http://{self.local_ip}:{self.port}",
             "tailscale_ip": self.tailscale_ip,
-            "tailscale_url": f"http://{self.tailscale_ip}:{self.port}" if self.tailscale_ip else None,
+            "tailscale_dns": ts_dns,
+            "tailscale_url": ts_url,
+            "tailscale_https_url": ts_https_url,
             "qr_image": self.qr_data_url,
             "error": self.error_msg,
         }

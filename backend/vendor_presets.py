@@ -798,9 +798,9 @@ VENDOR_PRESETS: Dict[str, Dict[str, Any]] = {
         "snapshot_url": "http://{ip}:{port}/webcapture.jpg?command=snap&channel={channel}",
         "ptz_supported": True,
         "quirks": [
-            "Bypasses ActiveX! OmniSight finds the camera's raw JPEG endpoint and polls it in HTML5, so it works in Chrome/Edge/Firefox/Safari with no Internet Explorer.",
-            "No working RTSP path is assumed - if the camera does offer RTSP, run the Universal Connection Prober and it will be used instead.",
-            "If the video does not appear immediately, OmniSight is auto-detecting the snapshot endpoint (webcapture.jpg, snapshot.jpg, ISAPI, ONVIF, CGI...)."
+            "Dual-Engine IE Support: Works with native Internet Explorer / Edge IE Mode (WebComponents.exe ActiveX clsid:E7EF736D) via the 🪟 IE Portal, AND streams in Chrome/Firefox/Safari via HTML5.",
+            "Click '🪟 Open IE Portal' or the card's 🪟 icon to launch the native ActiveX player or download WebComponents.exe directly from the camera.",
+            "Also auto-detects raw JPEG & RTSP endpoints (ISAPI, webcapture.jpg, snapshot.jpg, CGI) for plugin-free viewing."
         ],
         "default_channel": 1
     },

@@ -1204,9 +1204,9 @@ const BUILTIN_PRESETS = {
     "snapshot_url": "http://{ip}:{port}/webcapture.jpg?command=snap&channel={channel}",
     "ptz_supported": true,
     "quirks": [
-      "Bypasses ActiveX! OmniSight finds the camera's raw JPEG endpoint and polls it in HTML5 - no Internet Explorer needed.",
-      "The snapshot endpoint is auto-detected (webcapture.jpg, snapshot.jpg, ISAPI, ONVIF, CGI...).",
-      "If the camera does offer RTSP, run the Universal Connection Prober and that will be used instead."
+      "Dual-Engine IE Support: Works with native Internet Explorer / Edge IE Mode (WebComponents.exe ActiveX clsid:E7EF736D) via the 🪟 IE Portal, AND streams in Chrome/Firefox/Safari via HTML5.",
+      "Click '🪟 Open IE Portal' or the card's 🪟 icon to launch the native ActiveX player or download WebComponents.exe directly from the camera.",
+      "Also auto-detects raw JPEG & RTSP endpoints (ISAPI, webcapture.jpg, snapshot.jpg, CGI) for plugin-free viewing."
     ],
     "default_channel": 1
   },
@@ -1790,7 +1790,13 @@ async function fetchCloudRelayStatus() {
       cloudLanIp.textContent = data.local_url || "127.0.0.1:8080";
     }
     if (cloudTailscaleIp) {
-      cloudTailscaleIp.textContent = data.tailscale_url || "Not Connected";
+      cloudTailscaleIp.textContent = data.tailscale_url || (data.tailscale_dns ? `http://${data.tailscale_dns}:8080` : "http://hp250.tailccebcc.ts.net:8080");
+    }
+    const tsDomainLink = document.getElementById("cloudTailscaleDomainLink");
+    if (tsDomainLink && (data.tailscale_url || data.tailscale_dns)) {
+      const tsHref = data.tailscale_url || `http://${data.tailscale_dns}:8080`;
+      tsDomainLink.href = tsHref;
+      tsDomainLink.textContent = tsHref;
     }
 
     if (data.qr_image && cloudQrImage && cloudQrPlaceholder) {
@@ -1852,7 +1858,8 @@ function isPageOnLocalOrigin() {
     host === "[::1]" ||
     host === "::1" ||
     host.endsWith(".local") ||
-    /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.|169\.254\.)/.test(host)
+    host.endsWith(".ts.net") ||
+    /^(10\.|100\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.|169\.254\.)/.test(host)
   );
 }
 
@@ -2043,6 +2050,9 @@ async function detectBackend() {
           const tRes = await fetch(`${ep}?_t=${Date.now()}`, { cache: "no-cache" });
           if (tRes.ok) {
             const tData = await tRes.json();
+            if (tData.tailscale_https_url && !candidates.includes(tData.tailscale_https_url)) {
+              candidates.push(tData.tailscale_https_url);
+            }
             if (tData.cloud_url && tData.cloud_url.startsWith("https://") && !candidates.includes(tData.cloud_url)) {
               candidates.unshift(tData.cloud_url);
               break;
@@ -2065,14 +2075,19 @@ async function detectBackend() {
           localStorage.setItem("omnisight_hub_url", candidate);
         }
         const isTunnel = candidate.includes("trycloudflare.com");
+        const isTailscale = candidate.includes(".ts.net") || window.location.hostname.endsWith(".ts.net");
         const heroConnectionLabel = document.getElementById("heroConnectionLabel");
-        if (heroConnectionLabel) heroConnectionLabel.textContent = isTunnel ? "SECURE TUNNEL" : "LOCAL HUB";
-        appModeBadge.textContent = isTunnel ? "SECURE TUNNEL ONLINE" : "LOCAL HUB ONLINE";
+        if (heroConnectionLabel) heroConnectionLabel.textContent = isTailscale ? "TAILSCALE HUB" : (isTunnel ? "SECURE TUNNEL" : "LOCAL HUB");
+        appModeBadge.textContent = isTailscale ? "TAILSCALE ONLINE" : (isTunnel ? "SECURE TUNNEL ONLINE" : "LOCAL HUB ONLINE");
         appModeBadge.style.background = "rgba(179, 217, 118, 0.12)";
         appModeBadge.style.borderColor = "rgba(179, 217, 118, 0.30)";
         appModeBadge.style.color = "var(--accent-green)";
-        hubModeText.textContent = isTunnel ? "Connected via Cloudflare Secure Tunnel" : "Connected to Python NVR Hub (:8080)";
-        backendBridgeStatus.textContent = isTunnel ? `Cloudflare Tunnel Active (${candidate})` : "Local Server Mode: Full Hardware Multiplexing Active";
+        hubModeText.textContent = isTailscale
+          ? "Connected via Tailscale (hp250.tailccebcc.ts.net)"
+          : (isTunnel ? "Connected via Cloudflare Secure Tunnel" : "Connected to Python NVR Hub (:8080)");
+        backendBridgeStatus.textContent = isTailscale
+          ? `Tailscale MagicDNS Active (${window.location.hostname.endsWith(".ts.net") ? window.location.host : candidate})`
+          : (isTunnel ? `Cloudflare Tunnel Active (${candidate})` : "Local Server Mode: Full Hardware Multiplexing Active");
 
         if (status.ffmpeg_available) {
           ffmpegStatus.textContent = "RTSP Transcoder: FFmpeg Hardware Active";
@@ -2313,6 +2328,7 @@ function renderGrid() {
     card.dataset.id = cam.id;
 
     const vendorClass = (cam.vendor || "generic").replace("_dvr", "");
+    const isIeMode = Boolean(cam.ie_mode);
     const isLegacy = cam.legacy_polling || cam.vendor === "legacy_activex";
 
     const safeName = escapeHtml(cam.name);
@@ -2326,9 +2342,10 @@ function renderGrid() {
           <span class="cam-status-dot" id="statusDot-${safeId}" title="Live camera status"></span>
           <span class="cam-name" title="${safeName}">${safeName}</span>
           <span class="vendor-tag ${vendorClass}">${escapeHtml(cam.vendor || "CAM")}</span>
-          ${isLegacy ? `<span class="badge-legacy" title="ActiveX bypassed: HTML5 snapshot polling">NO-IE</span>` : ''}
+          ${isIeMode ? `<span class="badge-legacy" style="background: rgba(10, 132, 255, 0.22); color: #5ac8fa; border-color: rgba(10, 132, 255, 0.45);" title="Internet Explorer / WebComponents ActiveX Mode Enabled">IE / ACTIVEX</span>` : (isLegacy ? `<span class="badge-legacy" title="Works with IE ActiveX or HTML5 snapshot polling">IE / SNAP</span>` : '')}
         </div>
         <div class="card-actions">
+          <button class="btn-icon ${isIeMode ? 'active' : ''}" id="btnCardIe-${safeId}" title="Toggle Inline IE / WebComponents ActiveX Mode (Shift+Click for full window)" onclick="toggleCameraIeInline('${safeId}', event)">🪟</button>
           <button class="btn-icon" title="Maximize View" onclick="toggleFocus('${safeId}')">⛶</button>
           <button class="btn-icon" title="Take Snapshot" onclick="captureSnapshot('${safeId}', '${safeName}')">📷</button>
           ${cam.ptz ? `<button class="btn-icon" title="PTZ Controls" onclick="openPtz('${safeId}', '${safeName}')">🎮</button>` : ''}
@@ -2412,9 +2429,72 @@ if (typeof document !== "undefined") {
 }
 
 // Setup Camera Video Stream Player
+function openCameraIePortal(camId) {
+  const cam = cameras.find(c => c.id === camId);
+  if (localApiAvailable) {
+    const portalUrl = apiUrl(`/api/cameras/${encodeURIComponent(camId)}/ie-portal?token=${encodeURIComponent(authToken)}`);
+    window.open(portalUrl, "_blank", "noopener");
+    return;
+  }
+  if (cam && cam.ip) {
+    window.open(`http://${cam.ip}/doc/page/preview.asp`, "_blank", "noopener");
+  }
+}
+
+function toggleCameraIeInline(camId, evt) {
+  if (evt && evt.shiftKey) {
+    openCameraIePortal(camId);
+    return;
+  }
+  const cam = cameras.find(c => c.id === camId);
+  if (!cam) return;
+  const container = document.getElementById(`videoContainer-${cam.id}`);
+  if (!container) {
+    openCameraIePortal(camId);
+    return;
+  }
+  const existingFrame = container.querySelector("iframe.ie-inline-portal");
+  const btn = document.getElementById(`btnCardIe-${cam.id}`);
+  if (existingFrame) {
+    existingFrame.remove();
+    cam.ie_mode = false;
+    if (btn) btn.classList.remove("active");
+    const feedEl = container.querySelector(".video-feed");
+    if (feedEl) feedEl.style.display = "";
+    else setupCameraPlayer(cam);
+    showNotification(`${cam.name}: Switched back to standard matrix view`, "info");
+    return;
+  }
+
+  cam.ie_mode = true;
+  if (btn) btn.classList.add("active");
+  const feedEl = container.querySelector(".video-feed");
+  if (feedEl) feedEl.style.display = "none";
+
+  const iframe = document.createElement("iframe");
+  iframe.className = "video-feed ie-inline-portal";
+  iframe.style.cssText = "width:100%;height:100%;border:0;display:block;background:#000;position:relative;z-index:2;";
+  iframe.src = localApiAvailable
+    ? apiUrl(`/api/cameras/${encodeURIComponent(cam.id)}/ie-portal?token=${encodeURIComponent(authToken)}`)
+    : `http://${cam.ip || "192.168.1.13"}/doc/page/preview.asp`;
+  container.insertBefore(iframe, container.firstChild);
+  showNotification(`${cam.name}: Inline IE / WebComponents Portal active (Shift+Click 🪟 for new tab)`, "success");
+}
+
 function setupCameraPlayer(cam) {
   const container = document.getElementById(`videoContainer-${cam.id}`);
   if (!container) return;
+
+  if (cam.ie_mode) {
+    const iframe = document.createElement("iframe");
+    iframe.className = "video-feed ie-inline-portal";
+    iframe.style.cssText = "width:100%;height:100%;border:0;display:block;background:#000;position:relative;z-index:2;";
+    iframe.src = localApiAvailable
+      ? apiUrl(`/api/cameras/${encodeURIComponent(cam.id)}/ie-portal?token=${encodeURIComponent(authToken)}`)
+      : `http://${cam.ip || "192.168.1.13"}/doc/page/preview.asp`;
+    container.insertBefore(iframe, container.firstChild);
+    return;
+  }
 
   // Browser Camera Node direct local mirror with zero latency
   if ((cam.vendor === "browser_node" || cam.id === activeBrowserNodeCamId) && activeBrowserNodeStream) {
@@ -3435,6 +3515,8 @@ function openEditCameraModal(camId) {
   document.getElementById("camPass").value = cam.password || "";
   document.getElementById("camStreamUrl").value = cam.stream_url || "";
   document.getElementById("camPtz").checked = !!cam.ptz;
+  const ieModeCheck = document.getElementById("camIeMode");
+  if (ieModeCheck) ieModeCheck.checked = !!cam.ie_mode;
   document.getElementById("camLegacyPolling").checked = !!cam.legacy_polling;
   document.getElementById("camSimulated").checked = !!cam.is_simulated;
 
@@ -3464,6 +3546,8 @@ camVendor.addEventListener("change", () => {
     }
     if (selected === "legacy_activex") {
       document.getElementById("camLegacyPolling").checked = true;
+      const ieModeCheck = document.getElementById("camIeMode");
+      if (ieModeCheck) ieModeCheck.checked = true;
     }
     if (selected === "webcam" || selected === "browser_node") {
       document.getElementById("camIp").value = "127.0.0.1";
@@ -3555,6 +3639,7 @@ cameraForm.addEventListener("submit", async (e) => {
     password: formData.get("password"),
     stream_url: formData.get("stream_url"),
     ptz: document.getElementById("camPtz").checked,
+    ie_mode: Boolean(document.getElementById("camIeMode")?.checked),
     legacy_polling: document.getElementById("camLegacyPolling").checked,
     is_simulated: document.getElementById("camSimulated").checked
   };
@@ -4614,6 +4699,15 @@ function attachEventListeners() {
       if (e.key === "Enter") connectToHub();
     });
   }
+  document.getElementById("btnPresetTailscaleHttp")?.addEventListener("click", () => {
+    if (hubConnectorUrlInput) hubConnectorUrlInput.value = "http://hp250.tailccebcc.ts.net:8080";
+  });
+  document.getElementById("btnPresetTailscaleHttps")?.addEventListener("click", () => {
+    if (hubConnectorUrlInput) hubConnectorUrlInput.value = "https://hp250.tailccebcc.ts.net";
+  });
+  document.getElementById("btnPresetLanHub")?.addEventListener("click", () => {
+    if (hubConnectorUrlInput) hubConnectorUrlInput.value = "http://192.168.1.63:8080";
+  });
 
   btnLogoutNav.onclick = async () => {
     if (localApiAvailable && authToken) {
@@ -4971,6 +5065,68 @@ function attachEventListeners() {
     };
     img.src = `${snapUrl}?t=${Date.now()}`;
   };
+
+  document.getElementById("btnCtrlOpenIePortal")?.addEventListener("click", () => {
+    const ip = document.getElementById("ctrlIp").value.trim() || "192.168.1.13";
+    const vendor = document.getElementById("ctrlVendor").value || "hikvision";
+    const username = document.getElementById("ctrlUser")?.value.trim() || "admin";
+    const password = document.getElementById("ctrlPass")?.value || "";
+    const matchCam = cameras.find(c => c.ip === ip);
+    const camId = matchCam ? matchCam.id : "direct";
+    const portalUrl = localApiAvailable
+      ? apiUrl(`/api/cameras/${encodeURIComponent(camId)}/ie-portal?token=${encodeURIComponent(authToken)}&ip=${encodeURIComponent(ip)}&vendor=${encodeURIComponent(vendor)}&username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`)
+      : `http://${ip}/doc/page/preview.asp`;
+    const previewBox = document.getElementById("iePortalPreviewBox");
+    const iframe = document.getElementById("iePortalIframe");
+    if (previewBox && iframe && localApiAvailable) {
+      previewBox.classList.remove("hidden");
+      iframe.src = portalUrl;
+      logCtrl(`Embedded IE / ActiveX & Universal Stream Portal loaded for ${ip}.`);
+    } else {
+      window.open(portalUrl, "_blank", "noopener");
+      logCtrl(`Opened IE / ActiveX Portal in new tab: ${portalUrl}`);
+    }
+  });
+
+  document.getElementById("btnCtrlDownloadPlugin")?.addEventListener("click", () => {
+    const ip = document.getElementById("ctrlIp").value.trim() || "192.168.1.13";
+    const matchCam = cameras.find(c => c.ip === ip);
+    const camId = matchCam ? matchCam.id : "direct";
+    const dlUrl = localApiAvailable
+      ? apiUrl(`/api/cameras/${encodeURIComponent(camId)}/ie-plugin?token=${encodeURIComponent(authToken)}&ip=${encodeURIComponent(ip)}`)
+      : `http://${ip}/codebase/WebComponents.exe`;
+    logCtrl(`Downloading official Hikvision WebComponents.exe ActiveX installer from ${ip}...`);
+    window.open(dlUrl, "_blank", "noopener");
+  });
+
+  document.getElementById("btnCtrlOpenCameraWeb")?.addEventListener("click", () => {
+    const ip = document.getElementById("ctrlIp").value.trim() || "192.168.1.13";
+    const webUrl = `http://${ip}/doc/page/preview.asp`;
+    logCtrl(`Opening camera native IE web interface: ${webUrl} (Tip: Enable IE Mode in Edge if using WebComponents.exe)`);
+    window.open(webUrl, "_blank", "noopener");
+  });
+
+  document.getElementById("btnModalOpenIePortal")?.addEventListener("click", () => {
+    const camId = document.getElementById("camId").value || "direct";
+    const ip = document.getElementById("camIp").value.trim() || "192.168.1.13";
+    const vendor = document.getElementById("camVendor").value || "hikvision";
+    const username = document.getElementById("camUser").value.trim() || "admin";
+    const password = document.getElementById("camPass").value || "";
+    const channel = document.getElementById("camChannel").value || "1";
+    const portalUrl = localApiAvailable
+      ? apiUrl(`/api/cameras/${encodeURIComponent(camId)}/ie-portal?token=${encodeURIComponent(authToken)}&ip=${encodeURIComponent(ip)}&vendor=${encodeURIComponent(vendor)}&username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&channel=${encodeURIComponent(channel)}`)
+      : `http://${ip}/doc/page/preview.asp`;
+    window.open(portalUrl, "_blank", "noopener");
+  });
+
+  document.getElementById("btnModalDownloadPlugin")?.addEventListener("click", () => {
+    const camId = document.getElementById("camId").value || "direct";
+    const ip = document.getElementById("camIp").value.trim() || "192.168.1.13";
+    const dlUrl = localApiAvailable
+      ? apiUrl(`/api/cameras/${encodeURIComponent(camId)}/ie-plugin?token=${encodeURIComponent(authToken)}&ip=${encodeURIComponent(ip)}`)
+      : `http://${ip}/codebase/WebComponents.exe`;
+    window.open(dlUrl, "_blank", "noopener");
+  });
 
   // Close Modals
   document.getElementById("btnCloseCameraModal").onclick = () => cameraModal.classList.add("hidden");
