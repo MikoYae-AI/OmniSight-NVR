@@ -1,7 +1,8 @@
 {
-  "cloud_url": "https://steering-editorial-volume-ooo.trycloudflare.com",
+  "cloud_url": "https://brilliant-sustainability-diverse-regard.trycloudflare.com",
   "tailscale_dns": "hp250.tailccebcc.ts.net",
   "tailscale_url": "http://hp250.tailccebcc.ts.net:8080",
+  "directory_url": "http://hp250.tailccebcc.ts.net:8080/OmniSight-NVR/",
   "tailscale_https_url": "https://hp250.tailccebcc.ts.net",
-  "updated_at": 1794157698
+  "updated_at": 1794159052
 }
