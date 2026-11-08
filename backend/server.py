@@ -435,7 +435,8 @@ class OmniSightHandler(BaseHTTPRequestHandler):
 
         # API: Discovery Scan
         if path == "/api/discovery/scan":
-            result = run_full_discovery()
+            subnet_param = query.get("subnet", [""])[0].strip()
+            result = run_full_discovery(subnet_base=subnet_param)
             self.send_json(result)
             return
 
@@ -676,7 +677,7 @@ class OmniSightHandler(BaseHTTPRequestHandler):
             })
             return
 
-        # API: V380 Pro / V360 Pro Smart Controls (Night Vision, Siren, Intercom, Presets, Auto-Tracking)
+        # API: V380 Pro / V360 Pro Smart Controls (Night Vision, Siren, Intercom, Presets, Auto-Tracking, Reboot, Sync Time)
         if path.startswith("/api/cameras/") and path.endswith("/control"):
             cam_id = path.split("/")[3]
             session = stream_manager.get_session(cam_id)
@@ -698,6 +699,10 @@ class OmniSightHandler(BaseHTTPRequestHandler):
                 session.save_preset(int(val))
             elif ctrl_type == "goto_preset":
                 session.goto_preset(int(val))
+            elif ctrl_type in ("reboot", "sync_time", "toggle_ir", "day_night"):
+                hw_res = session.execute_hardware_command(command=ctrl_type, mode=str(val or "auto"))
+                self.send_json(hw_res)
+                return
 
             self.send_json({
                 "status": "ok",
@@ -779,15 +784,70 @@ class OmniSightHandler(BaseHTTPRequestHandler):
             username = body_data.get("username", "").strip()
             password = body_data.get("password", "")
             vendor_hint = body_data.get("vendor", "")
+            channel = body_data.get("channel", 1)
 
             probe_res = probe_camera_connection(
                 ip=ip,
                 port=port,
                 username=username,
                 password=password,
-                vendor_hint=vendor_hint
+                vendor_hint=vendor_hint,
+                channel=channel
             )
             self.send_json(probe_res)
+            return
+
+        # API: Zero-IE Direct Hardware Control (Reboot, Sync Clock, Toggle IR)
+        if path == "/api/cameras/hardware-control":
+            cmd = body_data.get("command", "").strip()
+            ip = body_data.get("ip", "").strip()
+            vendor = body_data.get("vendor", "hikvision").strip()
+            username = body_data.get("username", "admin").strip()
+            password = body_data.get("password", "")
+            mode = body_data.get("mode", "auto").strip()
+            cam_id = body_data.get("camera_id", "").strip()
+
+            # Match camera session by id or IP if one is registered in the matrix
+            session = stream_manager.get_session(cam_id) if cam_id else None
+            if not session and ip:
+                for c in config_manager.get_all_cameras():
+                    if c.get("ip") == ip:
+                        session = stream_manager.get_session(c["id"])
+                        break
+
+            if session:
+                res = session.execute_hardware_command(
+                    command=cmd,
+                    ip_override=ip,
+                    vendor_override=vendor,
+                    username_override=username,
+                    password_override=password,
+                    mode=mode,
+                )
+            else:
+                try:
+                    from .stream_proxy import CameraStreamSession
+                except (ImportError, ValueError):
+                    from stream_proxy import CameraStreamSession
+                temp_session = CameraStreamSession({
+                    "id": "ctrl-direct",
+                    "name": f"Direct Camera ({ip})",
+                    "ip": ip,
+                    "vendor": vendor,
+                    "username": username,
+                    "password": password,
+                    "is_simulated": ip.startswith("127.") or ip == "localhost",
+                })
+                res = temp_session.execute_hardware_command(
+                    command=cmd,
+                    ip_override=ip,
+                    vendor_override=vendor,
+                    username_override=username,
+                    password_override=password,
+                    mode=mode,
+                )
+            status_code = 400 if res.get("status") == "error" else 200
+            self.send_json(res, status_code)
             return
 
         # API: Ingest Live Frame from Browser Camera Node

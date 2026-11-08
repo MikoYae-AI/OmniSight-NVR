@@ -381,7 +381,8 @@ def probe_camera_connection(
     port: Optional[int] = None,
     username: str = "",
     password: str = "",
-    vendor_hint: str = ""
+    vendor_hint: str = "",
+    channel: int = 1
 ) -> Dict[str, Any]:
     """
     Universal Camera Auto-Detection & Diagnostic Engine.
@@ -390,17 +391,25 @@ def probe_camera_connection(
     """
     if not ip:
         return {"success": False, "error": "IP address is required"}
+    try:
+        channel_int = max(0, int(channel))
+    except (ValueError, TypeError):
+        channel_int = 1
 
     # Handle simulation shortcut
     if ip == "127.0.0.1" and vendor_hint == "simulated":
         return {
             "success": True,
+            "reachable": True,
+            "ip": ip,
             "detected_vendor": "simulated",
             "vendor_name": "OmniSight Virtual Generator",
             "stream_url": "sim://gate",
             "sub_stream_url": "sim://gate_sub",
             "snapshot_url": "/api/cameras/sim/snapshot",
             "codec": "Procedural H.264",
+            "rtsp": {"open": True, "video_codec": "Procedural H.264", "audio": False, "latency_ms": 1.0},
+            "snapshot": {"open": True, "url": "/api/cameras/sim/snapshot"},
             "resolution": "1920x1080",
             "fps": 25,
             "open_ports": [8000],
@@ -455,7 +464,7 @@ def probe_camera_connection(
                 p = preset_patterns[key]
                 path_only = re.sub(r"^rtsp://[^/]+/", "/", p).split("?")[0]
                 # Replace placeholders
-                path_clean = path_only.replace("{channel}", "1").replace("{channel_index}", "0")
+                path_clean = path_only.replace("{channel}", str(channel_int or 1)).replace("{channel_index}", str(max(0, (channel_int or 1) - 1)))
                 if path_clean not in candidate_paths:
                     candidate_paths.append(path_clean)
 
@@ -640,6 +649,19 @@ def probe_camera_connection(
         "snapshot_url": confirmed_snapshot_url,
         "codec": detected_codec,
         "audio_detected": audio_present,
+        "rtsp": {
+            "open": bool(confirmed_rtsp_path or rtsp_port),
+            "confirmed_path": confirmed_rtsp_path,
+            "video_codec": detected_codec,
+            "audio": audio_present,
+            "latency_ms": best_latency if best_latency < 900 else 15.0,
+        },
+        "snapshot": {
+            "open": bool(confirmed_snapshot_url),
+            "url": confirmed_snapshot_url,
+            "unauthenticated": snapshot_unauthenticated,
+        },
+        "recommended_mode": "snapshot" if (final_stream_url.startswith(("http://", "https://")) and not confirmed_rtsp_path) else "rtsp",
         "auth_required": auth_required,
         "password_status": password_status,
         "discovered_username": discovered_username,
@@ -764,14 +786,14 @@ def scan_lan_subnet(subnet_base: str = "", max_hosts: int = 40) -> List[Dict[str
     return results
 
 
-def run_full_discovery() -> Dict[str, Any]:
+def run_full_discovery(subnet_base: str = "") -> Dict[str, Any]:
     """Combines ONVIF discovery, LAN scanning, and local webcam detection."""
     onvif_devices = run_onvif_discovery(timeout=2.0)
     seen_ips = {d["ip"] for d in onvif_devices}
 
     devices = list(onvif_devices)
 
-    lan_devices = scan_lan_subnet(max_hosts=30)
+    lan_devices = scan_lan_subnet(subnet_base=subnet_base, max_hosts=30)
     for dev in lan_devices:
         if dev["ip"] not in seen_ips:
             devices.append(dev)

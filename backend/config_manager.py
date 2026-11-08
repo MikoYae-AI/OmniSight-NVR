@@ -258,11 +258,13 @@ class ConfigManager:
         if not token:
             return None
         with self._lock:
+            now = time.time()
+            # Prune expired sessions lazily to prevent unbounded memory growth
+            expired = [t for t, s in self._sessions.items() if now > s.get("expires_at", 0)]
+            for t in expired:
+                del self._sessions[t]
             session = self._sessions.get(token)
             if not session:
-                return None
-            if time.time() > session["expires_at"]:
-                del self._sessions[token]
                 return None
             return session
 
@@ -400,6 +402,13 @@ class ConfigManager:
             initial_len = len(cameras)
             self.data["cameras"] = [c for c in cameras if c.get("id") != camera_id]
             if len(self.data["cameras"]) != initial_len:
+                # Prune custom groups that no longer have any cameras assigned
+                active_groups = {c.get("group", "Default") for c in self.data["cameras"] if c.get("group")}
+                base_groups = {"All", "Perimeter", "Backyard", "Driveway", "Indoor", "Warehouse"}
+                self.data["groups"] = [
+                    g for g in self.data.get("groups", ["All"])
+                    if g in base_groups or g in active_groups
+                ]
                 self._save()
                 return True
             return False

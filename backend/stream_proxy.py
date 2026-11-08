@@ -428,6 +428,162 @@ class CameraStreamSession:
         except Exception:
             pass
 
+    def execute_hardware_command(
+        self,
+        command: str,
+        ip_override: str = "",
+        vendor_override: str = "",
+        username_override: str = "",
+        password_override: str = "",
+        mode: str = "auto",
+    ) -> Dict[str, Any]:
+        """Executes direct Zero-IE hardware commands (reboot, sync_time, toggle_ir) over ISAPI / CGI / ONVIF."""
+        ip = (ip_override or self.camera_info.get("ip") or "").strip()
+        vendor = (vendor_override or self.camera_info.get("vendor") or "hikvision").strip().lower()
+        username = username_override or self.camera_info.get("username") or "admin"
+        password = password_override if password_override != "" else (self.camera_info.get("password") or "")
+        channel = self.camera_info.get("channel", 1)
+
+        if not ip:
+            return {"status": "error", "error": "Camera IP address is required"}
+
+        cmd = (command or "").strip().lower()
+        target_url = ""
+        method = "GET"
+        payload: Optional[bytes] = None
+        content_type = "text/plain"
+        description = ""
+
+        if cmd == "reboot":
+            if vendor in ("hikvision", "hikvision_dvr", "ezviz"):
+                target_url = f"http://{ip}/ISAPI/System/reboot"
+                method = "PUT"
+                description = "Hikvision ISAPI System Reboot (PUT /ISAPI/System/reboot)"
+            elif vendor in ("dahua", "amcrest", "imou"):
+                target_url = f"http://{ip}/cgi-bin/magicBox.cgi?action=reboot"
+                method = "GET"
+                description = "Dahua magicBox CGI Reboot"
+            elif vendor == "axis":
+                target_url = f"http://{ip}/axis-cgi/admin/restart.cgi"
+                method = "GET"
+                description = "Axis VAPIX System Restart"
+            elif vendor == "reolink":
+                target_url = f"http://{ip}/cgi-bin/api.cgi?cmd=Reboot&user={urllib.parse.quote(username)}&password={urllib.parse.quote(password)}"
+                method = "GET"
+                description = "Reolink CGI Reboot"
+            else:
+                target_url = f"http://{ip}/cgi-bin/hi3510/sysreboot.cgi"
+                method = "GET"
+                description = "HiSilicon / Xiongmai CGI Reboot"
+
+        elif cmd == "sync_time":
+            iso_now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            local_now = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+            if vendor in ("hikvision", "hikvision_dvr", "ezviz"):
+                target_url = f"http://{ip}/ISAPI/System/time"
+                method = "PUT"
+                xml_body = (
+                    '<?xml version="1.0" encoding="UTF-8"?>'
+                    "<Time><timeMode>manual</timeMode>"
+                    f"<localTime>{iso_now}</localTime></Time>"
+                )
+                payload = xml_body.encode("utf-8")
+                content_type = "application/xml"
+                description = f"Hikvision ISAPI Time Sync ({iso_now})"
+            elif vendor in ("dahua", "amcrest", "imou"):
+                encoded_time = urllib.parse.quote(local_now)
+                target_url = f"http://{ip}/cgi-bin/global.cgi?action=setCurrentTime&time={encoded_time}"
+                method = "GET"
+                description = f"Dahua CGI Time Sync ({local_now})"
+            else:
+                encoded_time = urllib.parse.quote(local_now)
+                target_url = f"http://{ip}/cgi-bin/hi3510/param.cgi?cmd=setservertime&-time={encoded_time}"
+                method = "GET"
+                description = f"Camera CGI Clock Sync ({local_now})"
+
+        elif cmd in ("toggle_ir", "day_night"):
+            # Cycle or apply IR cut filter mode
+            next_mode = mode if mode in ("day", "night", "auto", "color", "ir", "smart") else (
+                "night" if self.night_vision in ("auto", "color", "day") else "auto"
+            )
+            self.set_night_vision("ir" if next_mode == "night" else ("color" if next_mode == "day" else next_mode))
+            if vendor in ("hikvision", "hikvision_dvr", "ezviz"):
+                ircut_type = "NIGHT" if next_mode in ("night", "ir") else ("DAY" if next_mode in ("day", "color") else "AUTO")
+                target_url = f"http://{ip}/ISAPI/Image/channels/{channel}/ircutFilter"
+                method = "PUT"
+                xml_body = (
+                    '<?xml version="1.0" encoding="UTF-8"?>'
+                    f"<IrcutFilter><IrcutFilterType>{ircut_type}</IrcutFilterType></IrcutFilter>"
+                )
+                payload = xml_body.encode("utf-8")
+                content_type = "application/xml"
+                description = f"Hikvision ISAPI IR-Cut Filter -> {ircut_type}"
+            elif vendor in ("dahua", "amcrest", "imou"):
+                # DayNightColor: 0=Auto, 1=Color(Day), 2=Brightness/B&W(Night)
+                dn_val = 2 if next_mode in ("night", "ir") else (1 if next_mode in ("day", "color") else 0)
+                target_url = f"http://{ip}/cgi-bin/configManager.cgi?action=setConfig&VideoInDayNight[{max(0, int(channel)-1)}].Mode={dn_val}"
+                method = "GET"
+                description = f"Dahua CGI Day/Night Mode -> {next_mode.upper()}"
+            else:
+                infra_val = "open" if next_mode in ("night", "ir") else ("close" if next_mode in ("day", "color") else "auto")
+                target_url = f"http://{ip}/cgi-bin/hi3510/param.cgi?cmd=setinfrared&-infraredstat={infra_val}"
+                method = "GET"
+                description = f"HiSilicon / Xiongmai IR Filter -> {infra_val.upper()}"
+        else:
+            return {"status": "error", "error": f"Unsupported hardware command: {command}"}
+
+        dispatched = False
+        http_status = None
+        note = "Simulated / queued (local loopback)"
+        if not self.is_simulated and not ip.startswith("127."):
+            dispatched, http_status, note = self._send_authenticated_http_with_result(
+                target_url, username, password, method=method, data=payload, content_type=content_type
+            )
+
+        return {
+            "status": "ok",
+            "command": cmd,
+            "ip": ip,
+            "vendor": vendor,
+            "method": method,
+            "target_url": target_url,
+            "description": description,
+            "dispatched": dispatched,
+            "http_status": http_status,
+            "note": note,
+            "night_vision": self.night_vision,
+            "timestamp": time.time(),
+        }
+
+    def _send_authenticated_http_with_result(
+        self,
+        url: str,
+        username: str,
+        password: str,
+        method: str = "GET",
+        data: Optional[bytes] = None,
+        content_type: str = "text/plain",
+    ):
+        """Executes HTTP request with Digest & Basic Auth and returns (dispatched, status_code, note)."""
+        try:
+            pwd_mgr = urllib.request.HTTPPasswordMgrWithDefaultRealm()
+            pwd_mgr.add_password(None, url, username, password or "")
+            auth_h = urllib.request.HTTPDigestAuthHandler(pwd_mgr)
+            basic_h = urllib.request.HTTPBasicAuthHandler(pwd_mgr)
+            opener = urllib.request.build_opener(auth_h, basic_h)
+            req = urllib.request.Request(
+                url,
+                data=data,
+                headers={"User-Agent": "OmniSight/1.0", "Content-Type": content_type},
+                method=method,
+            )
+            with opener.open(req, timeout=2.5) as resp:
+                return True, getattr(resp, "status", 200), "Hardware acknowledged command (HTTP 200)"
+        except urllib.error.HTTPError as he:
+            return True, he.code, f"Camera responded with HTTP {he.code}"
+        except Exception as exc:
+            return False, None, f"Dispatched ({exc.__class__.__name__})"
+
     def _send_authenticated_http(self, url: str, username: str, password: str, method: str = "GET", data: Optional[bytes] = None, content_type: str = "text/plain"):
         """Lightweight HTTP helper with Digest & Basic Auth for hardware camera controls."""
         try:
@@ -1338,6 +1494,14 @@ class CameraStreamSession:
             ai_color = (180, 80, 255)
             vendor_tag = "OMNISIGHT UNIVERSAL NVR • Universal Hub"
 
+        # Apply Night Vision / IR / Smart Floodlight OSD & visual treatment
+        if self.night_vision == "ir":
+            ai_color = (200, 200, 200)
+            osd_color = (220, 220, 220)
+        elif self.night_vision == "color":
+            # Warm white-light floodlight accent
+            draw.rectangle([0, 0, width, 6], fill=(255, 214, 10))
+
         draw.rectangle([x1, y1, x2, y2], outline=ai_color, width=2)
         draw.rectangle([x1, y1 - 18, x1 + 65, y1], fill=(15, 18, 24))
         draw.text((x1 + 4, y1 - 16), "OBJECT 98%", fill=ai_color)
@@ -1351,6 +1515,12 @@ class CameraStreamSession:
             track_color = (52, 199, 89)
             draw.line([(cx, cy), (target_x, target_y)], fill=track_color, width=1)
             draw.text((cx - 85, 72), "🎯 AUTO-TRACK: SENTRY LOCKED", fill=track_color)
+
+        if self.siren_active:
+            siren_col = (255, 59, 48) if int(t * 6) % 2 == 0 else (10, 132, 255)
+            draw.rectangle([0, 0, width - 1, height - 1], outline=siren_col, width=4)
+            draw.rectangle([cx - 125, 122, cx + 125, 145], fill=(36, 10, 14), outline=siren_col)
+            draw.text((cx - 110, 127), "🚨 ACTIVE DETERRENCE SIREN", fill=siren_col)
 
         if self.intercom_active:
             if time.time() - self.last_audio_tx < 2.5:

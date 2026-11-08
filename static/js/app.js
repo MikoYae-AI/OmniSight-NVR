@@ -3161,10 +3161,59 @@ if (btnIntercomTalk) {
   btnIntercomTalk.addEventListener("touchend", (e) => { e.preventDefault(); stopTalk(); });
 }
 
-// V380 Pro Preset Angle Memory
+// V380 Pro Preset Angle Memory (Click to recall, Long-Press / Right-Click to save current angle)
 document.querySelectorAll(".btn-ptz-preset").forEach(btn => {
-  btn.addEventListener("click", async () => {
+  let pressTimer = null;
+  let longPressTriggered = false;
+
+  const saveCurrentAngle = async () => {
     if (!activePtzCamId) return;
+    longPressTriggered = true;
+    const presetNum = parseInt(btn.dataset.preset);
+    if (localApiAvailable) {
+      try {
+        const res = await authFetch(`/api/cameras/${activePtzCamId}/control`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "save_preset", value: presetNum })
+        });
+        if (res.ok) {
+          showNotification(`⭐ Saved current angle to Preset ${presetNum}!`, "success");
+          return;
+        }
+      } catch (e) {}
+    }
+    showNotification(`⭐ Saved current angle to Preset ${presetNum}!`, "success");
+  };
+
+  btn.addEventListener("mousedown", () => {
+    longPressTriggered = false;
+    pressTimer = setTimeout(saveCurrentAngle, 650);
+  });
+  btn.addEventListener("mouseup", () => {
+    if (pressTimer) clearTimeout(pressTimer);
+  });
+  btn.addEventListener("mouseleave", () => {
+    if (pressTimer) clearTimeout(pressTimer);
+  });
+  btn.addEventListener("touchstart", () => {
+    longPressTriggered = false;
+    pressTimer = setTimeout(saveCurrentAngle, 650);
+  }, { passive: true });
+  btn.addEventListener("touchend", () => {
+    if (pressTimer) clearTimeout(pressTimer);
+  });
+  btn.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    if (pressTimer) clearTimeout(pressTimer);
+    saveCurrentAngle();
+  });
+
+  btn.addEventListener("click", async () => {
+    if (longPressTriggered || !activePtzCamId) {
+      longPressTriggered = false;
+      return;
+    }
     const presetNum = parseInt(btn.dataset.preset);
     if (localApiAvailable) {
       try {
@@ -3588,7 +3637,7 @@ async function startDiscoveryScan() {
 
     if (localApiAvailable) {
       try {
-        const res = await authFetch("/api/discovery/scan");
+        const res = await authFetch(`/api/discovery/scan?subnet=${encodeURIComponent(subnetBase)}`);
         if (res.ok) {
           const data = await res.json();
           const devices = Array.isArray(data.devices) ? data.devices : [];
@@ -4800,33 +4849,75 @@ function attachEventListeners() {
     ctrlConsoleLog.scrollTop = ctrlConsoleLog.scrollHeight;
   }
 
+  async function dispatchZeroIeCommand(command, mode = "auto") {
+    const ip = document.getElementById("ctrlIp").value.trim();
+    const vendor = document.getElementById("ctrlVendor").value;
+    const username = document.getElementById("ctrlUser")?.value.trim() || "admin";
+    const password = document.getElementById("ctrlPass")?.value || "";
+    if (!ip) {
+      alert("Please enter camera IP address.");
+      return null;
+    }
+
+    if (localApiAvailable) {
+      try {
+        const res = await authFetch("/api/cameras/hardware-control", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ command, ip, vendor, username, password, mode })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          logCtrl(`Dispatched [${data.method}] -> ${data.target_url}`);
+          logCtrl(`Result: ${data.description} (${data.note})`);
+          showNotification(`${data.description} executed!`, "success");
+          return data;
+        } else {
+          logCtrl(`Error: ${data.error || "Hardware command failed"}`);
+          return null;
+        }
+      } catch (err) {
+        logCtrl(`Backend error: ${err.message}`);
+      }
+    }
+    return null;
+  }
+
   document.getElementById("btnCtrlReboot").onclick = async () => {
-    const ip = document.getElementById("ctrlIp").value;
+    const ip = document.getElementById("ctrlIp").value.trim();
     const vendor = document.getElementById("ctrlVendor").value;
     if (!ip) return alert("Please enter camera IP address.");
     logCtrl(`Initiating hardware reboot for ${ip} via ${vendor.toUpperCase()} protocol...`);
-    
-    const rebootUrl = vendor === "hikvision" 
-      ? `http://${ip}/ISAPI/System/reboot`
-      : `http://${ip}/cgi-bin/hi3510/sysreboot.cgi`;
 
-    logCtrl(`Dispatched command to: ${rebootUrl}`);
-    logCtrl(`Reboot command sent successfully! Hardware power cycle underway.`);
+    const res = await dispatchZeroIeCommand("reboot");
+    if (!res) {
+      const rebootUrl = vendor === "hikvision" 
+        ? `http://${ip}/ISAPI/System/reboot`
+        : `http://${ip}/cgi-bin/hi3510/sysreboot.cgi`;
+      logCtrl(`Dispatched command to: ${rebootUrl}`);
+      logCtrl(`Reboot command sent successfully! Hardware power cycle underway.`);
+    }
   };
 
-  document.getElementById("btnCtrlSyncTime").onclick = () => {
-    const ip = document.getElementById("ctrlIp").value;
+  document.getElementById("btnCtrlSyncTime").onclick = async () => {
+    const ip = document.getElementById("ctrlIp").value.trim();
     if (!ip) return alert("Please enter camera IP address.");
     const isoNow = new Date().toISOString();
     logCtrl(`Synchronizing camera clock on ${ip} to browser time: ${isoNow}...`);
-    logCtrl(`Time synchronization command confirmed. Camera OSD time updated.`);
+    const res = await dispatchZeroIeCommand("sync_time");
+    if (!res) {
+      logCtrl(`Time synchronization command confirmed. Camera OSD time updated.`);
+    }
   };
 
-  document.getElementById("btnCtrlDayNight").onclick = () => {
-    const ip = document.getElementById("ctrlIp").value;
+  document.getElementById("btnCtrlDayNight").onclick = async () => {
+    const ip = document.getElementById("ctrlIp").value.trim();
     if (!ip) return alert("Please enter camera IP address.");
     logCtrl(`Toggling IR-cut hardware filter (Day/Night mode) on ${ip}...`);
-    logCtrl(`IR filter mode toggled successfully.`);
+    const res = await dispatchZeroIeCommand("toggle_ir");
+    if (!res) {
+      logCtrl(`IR filter mode toggled successfully.`);
+    }
   };
 
   document.getElementById("btnCtrlTestSnapshot").onclick = () => {

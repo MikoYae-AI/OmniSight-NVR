@@ -155,6 +155,33 @@ class TestV380V360ProFeatures(unittest.TestCase):
             self.assertTrue(frame_data.startswith(b"\xff\xd8"))
             self.assertTrue(frame_data.endswith(b"\xff\xd9"))
 
+    def test_04_zero_ie_hardware_control_api(self):
+        """Tests /api/cameras/hardware-control for reboot, sync_time, and toggle_ir."""
+        url = f"http://127.0.0.1:{self.port}/api/cameras/hardware-control"
+        for cmd, vendor, expected_path in (
+            ("reboot", "hikvision", "/ISAPI/System/reboot"),
+            ("sync_time", "dahua", "/cgi-bin/global.cgi?action=setCurrentTime"),
+            ("toggle_ir", "xiongmai", "/cgi-bin/hi3510/param.cgi?cmd=setinfrared"),
+        ):
+            req = urllib.request.Request(
+                url,
+                data=json.dumps({
+                    "command": cmd,
+                    "ip": "127.0.0.1",
+                    "vendor": vendor,
+                    "username": "admin",
+                    "password": "",
+                }).encode("utf-8"),
+                headers=self.headers,
+                method="POST",
+            )
+            with urllib.request.urlopen(req) as resp:
+                self.assertEqual(resp.status, 200)
+                data = json.loads(resp.read().decode("utf-8"))
+                self.assertEqual(data["status"], "ok")
+                self.assertEqual(data["command"], cmd)
+                self.assertIn(expected_path, data["target_url"])
+
 
 if __name__ == "__main__":
     unittest.main()
