@@ -1,4 +1,7 @@
 {
-  "cloud_url": "https://laughing-automatically-chem-coated.trycloudflare.com",
-  "updated_at": 1794132522
+  "cloud_url": "https://census-shore-kirk-correlation.trycloudflare.com",
+  "tailscale_dns": "hp250.tailccebcc.ts.net",
+  "tailscale_url": "http://hp250.tailccebcc.ts.net:8080",
+  "tailscale_https_url": "https://hp250.tailccebcc.ts.net",
+  "updated_at": 1794148251
 }
