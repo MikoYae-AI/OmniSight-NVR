@@ -26,14 +26,14 @@ DEFAULT_CAMERAS = [
         "port": 554,
         "username": "admin",
         "password": "Hik@1234",
-        "stream_url": "rtsp://admin:Hik%401234@192.168.1.13:554/Streaming/Channels/101",
+        "stream_url": "rtsp://admin:Hik%401234@192.168.1.13:554/Streaming/Channels/102",
         "sub_stream_url": "rtsp://admin:Hik%401234@192.168.1.13:554/Streaming/Channels/102",
         "snapshot_url": "http://192.168.1.13:80/ISAPI/Streaming/channels/101/picture",
         "channel": 1,
         "is_simulated": False,
         "legacy_polling": False,
         "status": "online",
-        "fps": 20,
+        "fps": 25,
         "resolution": "1920x1080",
         "ptz": True,
         "notes": "Hikvision 2MP Cube IP Camera (DS-2CD2420F-IW, R6 Platform)."
@@ -228,6 +228,15 @@ class ConfigManager:
             else:
                 self.data = copy.deepcopy(DEFAULT_CONFIG)
 
+            # Restore persisted sessions across hub restarts so live browser streams don't lose auth
+            saved_sessions = self.data.get("sessions", {})
+            if isinstance(saved_sessions, dict):
+                now = time.time()
+                self._sessions = {
+                    t: s for t, s in saved_sessions.items()
+                    if isinstance(s, dict) and now <= s.get("expires_at", 0)
+                }
+
             # Repair user-entered camera fields saved with stray whitespace
             # (e.g. username "admin ") so existing installs start working again.
             for cam in self.data.get("cameras", []):
@@ -249,6 +258,11 @@ class ConfigManager:
 
     def _save(self):
         with self._lock:
+            now = time.time()
+            self.data["sessions"] = {
+                t: s for t, s in self._sessions.items()
+                if isinstance(s, dict) and now <= s.get("expires_at", 0)
+            }
             os.makedirs(os.path.dirname(self.config_path), exist_ok=True)
             with open(self.config_path, "w", encoding="utf-8") as f:
                 json.dump(self.data, f, indent=2)
@@ -273,6 +287,7 @@ class ConfigManager:
                 "expires_at": expires_at
             }
             self._sessions[token] = session_info
+            self._save()
             return session_info
 
     def validate_session(self, token: str) -> Optional[Dict[str, Any]]:
@@ -293,6 +308,7 @@ class ConfigManager:
         with self._lock:
             if token in self._sessions:
                 del self._sessions[token]
+                self._save()
                 return True
             return False
 
@@ -371,6 +387,7 @@ class ConfigManager:
                 "expires_at": expires_at
             }
             self._sessions[token] = session_info
+            self._save()
             return session_info
 
     # --- Camera & Layout Methods ---

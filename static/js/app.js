@@ -63,14 +63,14 @@ const DEFAULT_CLIENT_CAMERAS = [
     port: 554,
     username: "admin",
     password: "Hik@1234",
-    stream_url: "rtsp://admin:Hik%401234@192.168.1.13:554/Streaming/Channels/101",
+    stream_url: "rtsp://admin:Hik%401234@192.168.1.13:554/Streaming/Channels/102",
     sub_stream_url: "rtsp://admin:Hik%401234@192.168.1.13:554/Streaming/Channels/102",
     snapshot_url: "http://192.168.1.13/ISAPI/Streaming/channels/101/picture",
     channel: 1,
     is_simulated: false,
     legacy_polling: false,
     status: "online",
-    fps: 20,
+    fps: 25,
     resolution: "1920x1080",
     ptz: true,
     notes: "Hikvision 2MP Cube IP Camera (DS-2CD2420F-IW, R6 Platform)."
@@ -2429,11 +2429,41 @@ function setupCameraPlayer(cam) {
   }
 
   if (localApiAvailable) {
-    // Connected to Python server: use native multipart MJPEG with auto-recovery
     const img = document.createElement("img");
     img.className = "video-feed";
-    img.src = apiUrl(`/api/cameras/${cam.id}/stream?token=${encodeURIComponent(authToken)}`);
     img.alt = cam.name;
+    container.insertBefore(img, container.firstChild);
+
+    // Cloudflare tunnels and cross-origin HTTP/2 proxies often buffer multipart/x-mixed-replace
+    // after the first JPEG frame. When connected via tunnel or cross-origin hub, use
+    // non-overlapping high-speed snapshot streaming so frames always animate smoothly!
+    const isTunnelOrCrossOrigin = Boolean(hubBaseUrl && (hubBaseUrl.includes("trycloudflare.com") || IS_GITHUB_PAGES));
+    if (isTunnelOrCrossOrigin) {
+      let frameInFlight = false;
+      const pullNextFrame = () => {
+        if (!img.isConnected || frameInFlight) return;
+        frameInFlight = true;
+        const nextUrl = apiUrl(`/api/cameras/${cam.id}/snapshot?token=${encodeURIComponent(authToken)}&_t=${Date.now()}`);
+        const preload = new Image();
+        preload.onload = () => {
+          frameInFlight = false;
+          if (!img.isConnected) return;
+          img.src = preload.src;
+          pollingIntervals[cam.id] = setTimeout(pullNextFrame, 60);
+        };
+        preload.onerror = () => {
+          frameInFlight = false;
+          if (!img.isConnected) return;
+          pollingIntervals[cam.id] = setTimeout(pullNextFrame, 1000);
+        };
+        preload.src = nextUrl;
+      };
+      pullNextFrame();
+      return;
+    }
+
+    // Same-origin local hub: use native multipart MJPEG with auto-recovery
+    img.src = apiUrl(`/api/cameras/${cam.id}/stream?token=${encodeURIComponent(authToken)}`);
     img.onerror = () => {
       setTimeout(() => {
         if (img && img.parentElement) {
@@ -2441,7 +2471,6 @@ function setupCameraPlayer(cam) {
         }
       }, 1500);
     };
-    container.insertBefore(img, container.firstChild);
     return;
   }
 

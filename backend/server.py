@@ -969,8 +969,10 @@ class OmniSightHandler(BaseHTTPRequestHandler):
 
         self.send_response(200)
         self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
-        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate, no-transform")
         self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
+        self.send_header("X-Accel-Buffering", "no")
         self.send_header("Connection", "close")
         self.send_cors_headers()
         self.end_headers()
@@ -996,6 +998,7 @@ class OmniSightHandler(BaseHTTPRequestHandler):
                     self.wfile.write(header)
                     self.wfile.write(frame)
                     self.wfile.write(b"\r\n")
+                    self.wfile.flush()
                     last_frame_bytes = frame
 
                 elapsed = time.time() - t0

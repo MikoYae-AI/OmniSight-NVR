@@ -881,6 +881,13 @@ class CameraStreamSession:
         if not ip:
             return 0
 
+        # Hikvision DS-2CD R6 platform cameras stall after 1 keyframe on main stream (101)
+        # over TCP interleaved RTP when 1080p IDR slices exceed the camera's internal buffer;
+        # channel 102 (sub-stream) streams continuously at 25-30 FPS with zero drops.
+        vendor = (self.camera_info.get("vendor") or "").strip().lower()
+        if vendor == "hikvision" and path.rstrip("/").endswith("/101"):
+            path = path.rstrip("/")[:-3] + "102"
+
         clean_uri = f"rtsp://{ip}:{port}{path}"
         basic_token = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
         basic_auth = f"Authorization: Basic {basic_token}\r\n"
@@ -997,12 +1004,16 @@ class CameraStreamSession:
                 return 0
 
             # Launch FFmpeg H.264 Annex-B -> MJPEG low-latency pipe decoder
+            # Use -probesize 32 -analyzeduration 0 so sub-streams (e.g. Hikvision 102)
+            # decode and emit their very first frame immediately with zero input buffering.
             fps = str(target_fps)
             ffmpeg_cmd = [
                 FFMPEG_BIN,
                 "-hide_banner",
                 "-loglevel", "error",
                 "-threads", "1",
+                "-probesize", "32",
+                "-analyzeduration", "0",
                 "-fflags", "nobuffer+discardcorrupt",
                 "-flags", "low_delay",
                 "-f", "h264",
@@ -1010,7 +1021,7 @@ class CameraStreamSession:
                 "-vf", "scale='min(1280,iw)':-2:flags=fast_bilinear",
                 "-f", "image2pipe",
                 "-vcodec", "mjpeg",
-                "-q:v", "5",
+                "-q:v", "4",
                 "-r", fps,
                 "-flush_packets", "1",
                 "pipe:1",
@@ -1208,6 +1219,17 @@ class CameraStreamSession:
                     u_enc = urllib.parse.quote(urllib.parse.unquote(u_raw), safe="")
                     p_enc = urllib.parse.quote(urllib.parse.unquote(p_raw), safe="")
                     effective_url = f"{scheme_p}{u_enc}:{p_enc}{hostpath_p}"
+
+            # For Hikvision RTSP streams with credentials, engage the native RTSP/TCP Basic-Auth
+            # depacketizer FIRST so we don't waste time waiting on FFmpeg's Digest 401 rejection.
+            vendor_lc = (self.camera_info.get("vendor") or "").strip().lower()
+            if vendor_lc == "hikvision" and any(effective_url.startswith(s) for s in ("rtsp://", "rtsps://")):
+                depack_frames = self._rtsp_tcp_basic_depacketizer(target_fps)
+                if depack_frames > 0:
+                    backoff = 1.0
+                    if not self._running:
+                        break
+                    continue
 
             # Build low-latency ingestion pipeline
             input_flags = [
