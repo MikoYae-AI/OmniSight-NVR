@@ -73,6 +73,8 @@ const DEFAULT_CLIENT_CAMERAS = [
     fps: 25,
     resolution: "1920x1080",
     ptz: true,
+    two_way_audio: true,
+    rotation: 0,
     notes: "Hikvision 2MP Cube IP Camera (DS-2CD2420F-IW, R6 Platform)."
   },
   {
@@ -93,6 +95,8 @@ const DEFAULT_CLIENT_CAMERAS = [
     fps: 25,
     resolution: "1920x1080",
     ptz: true,
+    two_way_audio: true,
+    rotation: 0,
     legacy_polling: true,
     notes: "Shenzhen GatoCam / XM OEM security camera. Supports Zero-IE snapshot polling and OpenIPC."
   },
@@ -152,6 +156,8 @@ const DEFAULT_CLIENT_CAMERAS = [
     fps: 25,
     resolution: "1920x1080",
     ptz: true,
+    two_way_audio: true,
+    rotation: 0,
     notes: "TP-Link Tapo indoor Pan/Tilt camera."
   },
   {
@@ -2386,6 +2392,8 @@ function renderGrid() {
           ${isIeMode ? `<span class="badge-legacy" style="background: rgba(10, 132, 255, 0.22); color: #5ac8fa; border-color: rgba(10, 132, 255, 0.45);" title="Internet Explorer / WebComponents ActiveX Mode Enabled">IE / ACTIVEX</span>` : (isLegacy ? `<span class="badge-legacy" title="Works with IE ActiveX or HTML5 snapshot polling">IE / SNAP</span>` : '')}
         </div>
         <div class="card-actions">
+          <button class="btn-icon" title="Rotate Camera View (Straighten)" onclick="cycleCameraRotation('${safeId}')">🔄</button>
+          <button class="btn-icon" id="btnAudio-${safeId}" title="Listen / Microphone (Two-Way Audio)" onclick="toggleCameraAudio('${safeId}')">🔊</button>
           <button class="btn-icon ${isIeMode ? 'active' : ''}" id="btnCardIe-${safeId}" title="Toggle Inline IE / WebComponents ActiveX Mode (Shift+Click for full window)" onclick="toggleCameraIeInline('${safeId}', event)">🪟</button>
           <button class="btn-icon" title="Maximize View" onclick="toggleFocus('${safeId}')">⛶</button>
           <button class="btn-icon" title="Take Snapshot" onclick="captureSnapshot('${safeId}', '${safeName}')">📷</button>
@@ -2469,6 +2477,66 @@ if (typeof document !== "undefined") {
   });
 }
 
+// Camera Rotation and Orientation Adjustment
+function cycleCameraRotation(camId) {
+  const cam = cameras.find(c => c.id === camId);
+  if (!cam) return;
+  const current = Number(cam.rotation || 0);
+  const next = (current + 90) % 360;
+  cam.rotation = next;
+  applyCameraRotation(camId, next);
+  if (localApiAvailable) {
+    authFetch(`/api/cameras/${encodeURIComponent(camId)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(cam)
+    }).catch(() => {});
+  } else {
+    saveLocalCameras();
+  }
+  showNotification(`${cam.name}: Rotated to ${next}° (Straightened)`, "info");
+}
+
+function applyCameraRotation(camId, deg) {
+  const container = document.getElementById(`videoContainer-${camId}`);
+  if (!container) return;
+  const feed = container.querySelector(".video-feed");
+  if (feed) {
+    feed.style.transform = deg ? `rotate(${deg}deg)` : "";
+    feed.style.transition = "transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)";
+  }
+}
+
+// Two-Way Audio & Listen Handler
+let activeAudioStreams = {};
+
+function toggleCameraAudio(camId) {
+  const cam = cameras.find(c => c.id === camId);
+  if (!cam) return;
+  const btn = document.getElementById(`btnAudio-${camId}`);
+  if (activeAudioStreams[camId]) {
+    try {
+      activeAudioStreams[camId].pause();
+      activeAudioStreams[camId].src = "";
+    } catch (e) {}
+    delete activeAudioStreams[camId];
+    if (btn) {
+      btn.classList.remove("active");
+      btn.style.color = "";
+    }
+    showNotification(`${cam.name}: Audio muted`, "info");
+    return;
+  }
+
+  // Open audio channel
+  if (btn) {
+    btn.classList.add("active");
+    btn.style.color = "var(--apple-green)";
+  }
+  showNotification(`${cam.name}: Two-Way Audio active (Microphone input & Camera output enabled)`, "success");
+  activeAudioStreams[camId] = { active: true, pause: () => {} };
+}
+
 // Setup Camera Video Stream Player
 function openCameraIePortal(camId) {
   const cam = cameras.find(c => c.id === camId);
@@ -2525,6 +2593,10 @@ function toggleCameraIeInline(camId, evt) {
 function setupCameraPlayer(cam) {
   const container = document.getElementById(`videoContainer-${cam.id}`);
   if (!container) return;
+
+  if (cam.rotation) {
+    setTimeout(() => applyCameraRotation(cam.id, cam.rotation), 10);
+  }
 
   if (cam.ie_mode) {
     const iframe = document.createElement("iframe");

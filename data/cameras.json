@@ -24,7 +24,9 @@
       "resolution": "1920x1080",
       "ptz": true,
       "notes": "Hikvision 2MP Cube IP Camera (DS-2CD2420F-IW, R6 Platform).",
-      "ie_mode": true
+      "ie_mode": false,
+      "rotation": 0,
+      "two_way_audio": true
     },
     {
       "id": "cam-gatocam-01",
@@ -229,6 +231,81 @@
       "token": "d505110e47a01769833f9a94181c8dad11eeebfa3efee5f4c6056941eadf6948",
       "username": "admin",
       "expires_at": 1794245829.1888967
+    },
+    "ac7942f7a493ffd8bfc2e23ced1fa6b48d1d744c29d0740f8fda76fdd9f08203": {
+      "token": "ac7942f7a493ffd8bfc2e23ced1fa6b48d1d744c29d0740f8fda76fdd9f08203",
+      "username": "admin",
+      "expires_at": 1794255195.2066967
+    },
+    "76d6238e71b984223f496caf9f65ab882b34e79cb48b4d5fa0dfdc0705427c01": {
+      "token": "76d6238e71b984223f496caf9f65ab882b34e79cb48b4d5fa0dfdc0705427c01",
+      "username": "admin",
+      "expires_at": 1794256596.5110228
+    },
+    "cc1634fd25ac3d52f0b88b6b80ad1e5d0b4f10af3be4d63e69ae3de2efa20d87": {
+      "token": "cc1634fd25ac3d52f0b88b6b80ad1e5d0b4f10af3be4d63e69ae3de2efa20d87",
+      "username": "admin",
+      "expires_at": 1794259442.5483775
+    },
+    "278ae5486af8285b5658466344f1f4ad381f28e9a44a63ee2499d71b99a33392": {
+      "token": "278ae5486af8285b5658466344f1f4ad381f28e9a44a63ee2499d71b99a33392",
+      "username": "admin",
+      "expires_at": 1794268546.4073555
+    },
+    "1bbf8cea472d30dc8ea12f94a41996f8a0e59ef11517ebb6c3acc36b5af43262": {
+      "token": "1bbf8cea472d30dc8ea12f94a41996f8a0e59ef11517ebb6c3acc36b5af43262",
+      "username": "admin",
+      "expires_at": 1794268895.495115
+    },
+    "0c419e6c99b8d4e73fb4132f23e890d0fa6d6ae5d02cc1ce332f6dfb81588938": {
+      "token": "0c419e6c99b8d4e73fb4132f23e890d0fa6d6ae5d02cc1ce332f6dfb81588938",
+      "username": "admin",
+      "expires_at": 1794269083.9639452
+    },
+    "49d668a133ec40502b9f6b94fdd014c83e02a7973507f9088414d5774a742874": {
+      "token": "49d668a133ec40502b9f6b94fdd014c83e02a7973507f9088414d5774a742874",
+      "username": "admin",
+      "expires_at": 1794269173.1152012
+    },
+    "c4eda2244d745270042e5082e662dc1408db9340a580b9ef686102d7d0575741": {
+      "token": "c4eda2244d745270042e5082e662dc1408db9340a580b9ef686102d7d0575741",
+      "username": "admin",
+      "expires_at": 1794269191.9273374
+    },
+    "9ddfd9b9d4e03e242ea1f476bcf42cca1379cf546e55cffd663a6164dd491cf2": {
+      "token": "9ddfd9b9d4e03e242ea1f476bcf42cca1379cf546e55cffd663a6164dd491cf2",
+      "username": "admin",
+      "expires_at": 1794269208.2941816
+    },
+    "7abf1d87e8d04496003f5ba0a2240a100bf088531e8c7754fabf7db7ce0f353b": {
+      "token": "7abf1d87e8d04496003f5ba0a2240a100bf088531e8c7754fabf7db7ce0f353b",
+      "username": "admin",
+      "expires_at": 1794269277.4260678
+    },
+    "f8f986586e89eba96df497ebeae712e8f5afded4be1f20c5b5196ef05b899078": {
+      "token": "f8f986586e89eba96df497ebeae712e8f5afded4be1f20c5b5196ef05b899078",
+      "username": "admin",
+      "expires_at": 1794269412.0913785
+    },
+    "854e6915666f0171a661c137e3e5ca5ce31f954325a39b6a5c072f987e11e949": {
+      "token": "854e6915666f0171a661c137e3e5ca5ce31f954325a39b6a5c072f987e11e949",
+      "username": "admin",
+      "expires_at": 1794269671.2704492
+    },
+    "216dcd5df3bc693345363d54345ca767b75cbec4cd91d5606d975a490bb8219d": {
+      "token": "216dcd5df3bc693345363d54345ca767b75cbec4cd91d5606d975a490bb8219d",
+      "username": "admin",
+      "expires_at": 1794269672.389957
+    },
+    "35062398a30b7f98dad257f37fe21cf91b51006f05b6d13b9c808ceba2b0a979": {
+      "token": "35062398a30b7f98dad257f37fe21cf91b51006f05b6d13b9c808ceba2b0a979",
+      "username": "admin",
+      "expires_at": 1794269694.2456117
+    },
+    "bd640291e316bb5818f8acb308a742d3a7355268cb89956b5dd72891937cc6d7": {
+      "token": "bd640291e316bb5818f8acb308a742d3a7355268cb89956b5dd72891937cc6d7",
+      "username": "admin",
+      "expires_at": 1794269694.8169892
     }
   }
 }
