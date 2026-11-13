@@ -2502,6 +2502,7 @@ function applyCameraRotation(camId, deg) {
   if (!container) return;
   const feed = container.querySelector(".video-feed");
   if (feed) {
+    feed.style.transformOrigin = "center center";
     feed.style.transform = deg ? `rotate(${deg}deg)` : "";
     feed.style.transition = "transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)";
   }
@@ -2510,31 +2511,91 @@ function applyCameraRotation(camId, deg) {
 // Two-Way Audio & Listen Handler
 let activeAudioStreams = {};
 
-function toggleCameraAudio(camId) {
+async function toggleCameraAudio(camId) {
   const cam = cameras.find(c => c.id === camId);
   if (!cam) return;
   const btn = document.getElementById(`btnAudio-${camId}`);
   if (activeAudioStreams[camId]) {
-    try {
-      activeAudioStreams[camId].pause();
-      activeAudioStreams[camId].src = "";
-    } catch (e) {}
+    const entry = activeAudioStreams[camId];
+    if (entry.stream) {
+      try { entry.stream.getTracks().forEach(t => t.stop()); } catch (e) {}
+    }
+    if (entry.recorder && entry.recorder.state !== "inactive") {
+      try { entry.recorder.stop(); } catch (e) {}
+    }
+    if (entry.audio) {
+      try { entry.audio.pause(); entry.audio.src = ""; } catch (e) {}
+    }
     delete activeAudioStreams[camId];
     if (btn) {
       btn.classList.remove("active");
       btn.style.color = "";
     }
-    showNotification(`${cam.name}: Audio muted`, "info");
+    if (localApiAvailable) {
+      try {
+        await authFetch(`/api/cameras/${camId}/control`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "intercom", value: false })
+        });
+      } catch (err) {}
+    }
+    showNotification(`${cam.name}: Two-Way Audio muted`, "info");
     return;
   }
 
-  // Open audio channel
+  // Open audio channel & request microphone
+  let micStream = null;
+  let micRecorder = null;
+  try {
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const options = (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported("audio/webm;codecs=opus"))
+        ? { mimeType: "audio/webm;codecs=opus" }
+        : {};
+      micRecorder = new MediaRecorder(micStream, options);
+      micRecorder.ondataavailable = async (e) => {
+        if (e.data && e.data.size > 0 && activeAudioStreams[camId]) {
+          const reader = new FileReader();
+          reader.onloadend = async () => {
+            const resParts = (reader.result || "").split(",");
+            const base64Data = resParts.length > 1 ? resParts[1] : "";
+            if (base64Data && localApiAvailable) {
+              try {
+                await authFetch(`/api/cameras/${camId}/talk`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ audio_base64: base64Data, format: "webm" })
+                });
+              } catch (err) {}
+            }
+          };
+          reader.readAsDataURL(e.data);
+        }
+      };
+      micRecorder.start(250);
+    }
+  } catch (micErr) {
+    console.warn("Microphone not available, continuing in listen mode:", micErr);
+  }
+
+  activeAudioStreams[camId] = {
+    active: true,
+    stream: micStream,
+    recorder: micRecorder,
+    pause: () => {
+      if (micStream) micStream.getTracks().forEach(t => t.stop());
+      if (micRecorder && micRecorder.state !== "inactive") {
+        try { micRecorder.stop(); } catch (e) {}
+      }
+    }
+  };
+
   if (btn) {
     btn.classList.add("active");
     btn.style.color = "var(--apple-green)";
   }
-  showNotification(`${cam.name}: Two-Way Audio active (Microphone input & Camera output enabled)`, "success");
-  activeAudioStreams[camId] = { active: true, pause: () => {} };
+  showNotification(`${cam.name}: Two-Way Audio Active (Live Microphone & Talkback)`, "success");
 }
 
 // Setup Camera Video Stream Player
@@ -4537,6 +4598,27 @@ function initAppHelper() {
 // Attach Event Listeners
 function attachEventListeners() {
   initAppHelper();
+
+  // Hero Overview Banner Toggle
+  const btnToggleHero = document.getElementById("btnToggleHero");
+  const dashboardHero = document.getElementById("dashboardHero");
+  const heroToggleIcon = document.getElementById("heroToggleIcon");
+  const heroToggleText = document.getElementById("heroToggleText");
+  const savedHeroState = localStorage.getItem("omnisight_hero_collapsed");
+  if (savedHeroState === "true" && dashboardHero) {
+    dashboardHero.classList.add("collapsed");
+    if (heroToggleIcon) heroToggleIcon.textContent = "⌄";
+    if (heroToggleText) heroToggleText.textContent = "Show Banner";
+  }
+
+  if (btnToggleHero && dashboardHero) {
+    btnToggleHero.onclick = () => {
+      const isCollapsed = dashboardHero.classList.toggle("collapsed");
+      localStorage.setItem("omnisight_hero_collapsed", isCollapsed ? "true" : "false");
+      if (heroToggleIcon) heroToggleIcon.textContent = isCollapsed ? "⌄" : "⌃";
+      if (heroToggleText) heroToggleText.textContent = isCollapsed ? "Show Banner" : "Hide Banner";
+    };
+  }
 
   // Layout Buttons
   document.querySelectorAll(".btn-layout").forEach(btn => {

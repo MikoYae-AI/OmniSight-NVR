@@ -102,7 +102,12 @@
     </header>
 
     <!-- Editorial dashboard hero / status overview -->
-    <section class="dashboard-hero" aria-labelledby="dashboardTitle">
+    <div class="hero-toggle-bar">
+      <button type="button" class="btn-hero-toggle" id="btnToggleHero" title="Toggle Dashboard Overview Banner">
+        <span id="heroToggleIcon">⌃</span> <span id="heroToggleText">Hide Banner</span>
+      </button>
+    </div>
+    <section class="dashboard-hero" id="dashboardHero" aria-labelledby="dashboardTitle">
       <div class="hero-copy">
         <p class="hero-kicker"><span class="hero-kicker-mark" aria-hidden="true"></span>  OMNISIGHT DIRECTORY <span class="hero-kicker-divider">/</span> 24/7 HIGH-RES 1080P SENTRY</p>
         <h2 id="dashboardTitle">Every angle, <em>in view.</em></h2>
@@ -1197,7 +1202,7 @@
   </div>
 
   <!-- V380 Pro / V360 Pro Mobile PTZ Command Deck -->
-  <div class="ptz-overlay-panel hidden" id="ptzPanel" style="max-width: 380px; width: 92%; border-radius: 16px; box-shadow: 0 16px 40px rgba(0,0,0,0.6); background: rgba(18, 18, 22, 0.95); backdrop-filter: blur(20px); border: 1px solid rgba(255, 255, 255, 0.1);">
+  <div class="ptz-overlay-panel hidden" id="ptzPanel">
     <div class="ptz-header" style="border-bottom: 1px solid rgba(255,255,255,0.08); padding: 12px 16px; display: flex; justify-content: space-between; align-items: center;">
       <div style="display: flex; align-items: center; gap: 8px;">
         <span style="font-size: 16px;">🎮</span>
