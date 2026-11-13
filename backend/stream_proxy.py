@@ -1003,7 +1003,7 @@ class CameraStreamSession:
             if b" 200 " not in r_play[:200]:
                 return 0
 
-            # Launch FFmpeg H.264 Annex-B -> MJPEG low-latency pipe decoder (Full HD 1920x1080)
+            # Launch FFmpeg H.264 Annex-B -> MJPEG low-latency pipe decoder
             fps = str(target_fps)
             is_sub = path.rstrip("/").endswith("/102")
             probe_sz = "32" if is_sub else "256000"
@@ -1018,10 +1018,10 @@ class CameraStreamSession:
                 "-flags", "low_delay",
                 "-f", "h264",
                 "-i", "pipe:0",
-                "-vf", "scale='min(1920,iw)':-2:flags=fast_bilinear",
+                "-vf", "scale='min(1280,iw)':-2:flags=fast_bilinear",
                 "-f", "image2pipe",
                 "-vcodec", "mjpeg",
-                "-q:v", "2",
+                "-q:v", "4",
                 "-r", fps,
                 "-flush_packets", "1",
                 "pipe:1",
@@ -1232,8 +1232,9 @@ class CameraStreamSession:
                     continue
 
             # Build low-latency ingestion pipeline
+            threads_count = "2" if os.cpu_count() and os.cpu_count() >= 4 else "1"
             input_flags = [
-                "-threads", "1",
+                "-threads", threads_count,
                 "-fflags", "nobuffer+discardcorrupt",
                 "-flags", "low_delay",
                 "-avioflags", "direct",
@@ -1256,7 +1257,7 @@ class CameraStreamSession:
                 "-vf", "scale='min(1920,iw)':-2:flags=fast_bilinear",
                 "-f", "image2pipe",
                 "-vcodec", "mjpeg",
-                "-q:v", "2",
+                "-q:v", "4",
                 "-r", fps,
                 "-flush_packets", "1",
                 "-"

@@ -2503,7 +2503,14 @@ function applyCameraRotation(camId, deg) {
   const feed = container.querySelector(".video-feed");
   if (feed) {
     feed.style.transformOrigin = "center center";
-    feed.style.transform = deg ? `rotate(${deg}deg)` : "";
+    const normalizedDeg = ((Number(deg) || 0) % 360 + 360) % 360;
+    if (normalizedDeg === 90 || normalizedDeg === 270) {
+      feed.style.transform = `rotate(${normalizedDeg}deg) scale(0.5625)`;
+    } else if (normalizedDeg === 180) {
+      feed.style.transform = `rotate(180deg)`;
+    } else {
+      feed.style.transform = "";
+    }
     feed.style.transition = "transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)";
   }
 }
@@ -2707,12 +2714,12 @@ function setupCameraPlayer(cam) {
             const hudEl = container.querySelector(".video-overlay-hud");
             if (hudEl) hudEl.textContent = `${preload.naturalWidth}×${preload.naturalHeight} HD • ${cam.fps || 25} FPS`;
           }
-          pollingIntervals[cam.id] = setTimeout(pullNextFrame, 60);
+          pollingIntervals[cam.id] = setTimeout(pullNextFrame, 20);
         };
         preload.onerror = () => {
           frameInFlight = false;
           if (!img.isConnected) return;
-          pollingIntervals[cam.id] = setTimeout(pullNextFrame, 1000);
+          pollingIntervals[cam.id] = setTimeout(pullNextFrame, 500);
         };
         preload.src = nextUrl;
       };
