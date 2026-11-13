@@ -102,7 +102,12 @@
     </header>
 
     <!-- Editorial dashboard hero / status overview -->
-    <section class="dashboard-hero" aria-labelledby="dashboardTitle">
+    <div class="hero-toggle-bar">
+      <button type="button" class="btn-hero-toggle" id="btnToggleHero" title="Toggle Dashboard Overview Banner">
+        <span id="heroToggleIcon">⌃</span> <span id="heroToggleText">Hide Banner</span>
+      </button>
+    </div>
+    <section class="dashboard-hero" id="dashboardHero" aria-labelledby="dashboardTitle">
       <div class="hero-copy">
         <p class="hero-kicker"><span class="hero-kicker-mark" aria-hidden="true"></span>  OMNISIGHT DIRECTORY <span class="hero-kicker-divider">/</span> 24/7 HIGH-RES 1080P SENTRY</p>
         <h2 id="dashboardTitle">Every angle, <em>in view.</em></h2>

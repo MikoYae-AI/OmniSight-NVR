@@ -4599,6 +4599,27 @@ function initAppHelper() {
 function attachEventListeners() {
   initAppHelper();
 
+  // Hero Overview Banner Toggle
+  const btnToggleHero = document.getElementById("btnToggleHero");
+  const dashboardHero = document.getElementById("dashboardHero");
+  const heroToggleIcon = document.getElementById("heroToggleIcon");
+  const heroToggleText = document.getElementById("heroToggleText");
+  const savedHeroState = localStorage.getItem("omnisight_hero_collapsed");
+  if (savedHeroState === "true" && dashboardHero) {
+    dashboardHero.classList.add("collapsed");
+    if (heroToggleIcon) heroToggleIcon.textContent = "⌄";
+    if (heroToggleText) heroToggleText.textContent = "Show Banner";
+  }
+
+  if (btnToggleHero && dashboardHero) {
+    btnToggleHero.onclick = () => {
+      const isCollapsed = dashboardHero.classList.toggle("collapsed");
+      localStorage.setItem("omnisight_hero_collapsed", isCollapsed ? "true" : "false");
+      if (heroToggleIcon) heroToggleIcon.textContent = isCollapsed ? "⌄" : "⌃";
+      if (heroToggleText) heroToggleText.textContent = isCollapsed ? "Show Banner" : "Hide Banner";
+    };
+  }
+
   // Layout Buttons
   document.querySelectorAll(".btn-layout").forEach(btn => {
     btn.onclick = () => setLayout(btn.dataset.layout);
